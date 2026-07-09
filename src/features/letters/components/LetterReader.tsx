@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { AnnotationLayer } from "@/features/annotations/components/AnnotationLayer";
 import type { ReaderLetter } from "@/features/letters/actions";
 import { SevenCharGate } from "@/features/letters/components/SevenCharGate";
 
@@ -57,6 +58,7 @@ export function LetterReader({ letter }: { letter: ReaderLetter }) {
       </div>
 
       <div className="mt-6 whitespace-pre-wrap rounded-[1.5rem] bg-white/55 p-5 leading-8 text-[var(--ink)]">{letter.body}</div>
+      <AnnotationLayer letterId={letter.id} annotations={letter.annotations} />
     </motion.article>
   );
 }

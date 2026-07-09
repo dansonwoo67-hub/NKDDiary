@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth/require-user";
 import { signOutAction } from "@/features/auth/actions";
+import { NotificationBell } from "@/features/notifications/components/NotificationBell";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,7 @@ async function AuthenticatedAppLayout({ children }: { children: React.ReactNode 
         </Link>
         <div className="flex items-center gap-3">
           <span>{profile.display_name}</span>
+          <NotificationBell />
           <Link href="/write" className="rounded-full bg-white/70 px-3 py-1">
             写信
           </Link>
