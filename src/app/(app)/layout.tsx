@@ -23,6 +23,9 @@ async function AuthenticatedAppLayout({ children }: { children: React.ReactNode 
         </Link>
         <div className="flex items-center gap-3">
           <span>{profile.display_name}</span>
+          <Link href="/write" className="rounded-full bg-white/70 px-3 py-1">
+            写信
+          </Link>
           <Link href="/settings" className="rounded-full bg-white/70 px-3 py-1">
             设置
           </Link>
