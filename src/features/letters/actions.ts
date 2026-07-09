@@ -5,7 +5,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { getChinaDateString } from "@/lib/date/china-day";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/features/profile/actions";
-import { canEditLetter, validateSevenCharLine } from "@/features/letters/rules";
+import { canEditLetter, validateOpenResponse, validateSevenCharLine } from "@/features/letters/rules";
 
 export type SaveLetterInput = {
   body: string;
@@ -33,6 +33,27 @@ export type EditorLetterState = {
   letter: EditorLetter | null;
   canEdit: boolean;
   lockedMessage: string | null;
+};
+
+export type ReaderLetter = {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorAvatarUrl: string | null;
+  letterDate: string;
+  body: string;
+  selfMoodValue: number;
+  mealValue: number;
+  healthValue: number;
+  sevenCharLine: string;
+  hasOpened: boolean;
+  openResponseText: string | null;
+};
+
+export type LetterDayView = {
+  date: string;
+  currentUserId: string;
+  letters: ReaderLetter[];
 };
 
 function normalizeSliderValue(value: number) {
@@ -160,4 +181,105 @@ export async function saveLetterAction(input: SaveLetterInput): Promise<ActionRe
   revalidatePath("/write");
 
   return { ok: true, message: "今天的信保存好啦。" };
+}
+
+export async function createOpenResponseAction(input: { letterId: string; responseText: string }): Promise<ActionResult> {
+  const { userId, profile } = await requireUser();
+  const supabase = await createServerSupabaseClient();
+
+  let responseText: string;
+  try {
+    responseText = validateOpenResponse(input.responseText);
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : "回应不符合要求。" };
+  }
+
+  const { data: letter, error: letterError } = await supabase
+    .from("letters")
+    .select("id, author_id")
+    .eq("id", input.letterId)
+    .single();
+
+  if (letterError || !letter) {
+    return { ok: false, message: letterError?.message ?? "没有找到这封信。" };
+  }
+
+  if (String(letter.author_id) === userId) {
+    return { ok: true, message: "自己的信可以直接展开。" };
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("letter_open_responses")
+    .select("id")
+    .eq("letter_id", input.letterId)
+    .eq("reader_id", userId)
+    .maybeSingle();
+
+  if (existingError) {
+    return { ok: false, message: existingError.message };
+  }
+
+  if (!existing) {
+    const { error } = await supabase.from("letter_open_responses").insert({
+      letter_id: input.letterId,
+      reader_id: userId,
+      response_text: responseText,
+    });
+
+    if (error) {
+      return { ok: false, message: error.message };
+    }
+
+    await supabase.from("notifications").insert({
+      recipient_id: String(letter.author_id),
+      type: "letter_opened",
+      source_id: input.letterId,
+      title: `${profile.display_name} 展开了你的信`,
+      body: `回应：${responseText}`,
+    });
+  }
+
+  revalidatePath("/");
+  return { ok: true, message: "展信啦。" };
+}
+
+export async function getLettersForDate(date: string): Promise<LetterDayView> {
+  const { userId } = await requireUser();
+  const supabase = await createServerSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("letters")
+    .select(
+      "id, author_id, letter_date, body, self_mood_value, meal_value, health_value, seven_char_line, profiles:author_id(display_name, avatar_url), letter_open_responses(reader_id, response_text)",
+    )
+    .eq("letter_date", date)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  const letters: ReaderLetter[] = (data ?? []).map((letter) => {
+    const profile = Array.isArray(letter.profiles) ? letter.profiles[0] : letter.profiles;
+    const responses = Array.isArray(letter.letter_open_responses) ? letter.letter_open_responses : [];
+    const ownLetter = String(letter.author_id) === userId;
+    const response = responses.find((item) => String(item.reader_id) === userId);
+
+    return {
+      id: String(letter.id),
+      authorId: String(letter.author_id),
+      authorName: String(profile?.display_name ?? "对方"),
+      authorAvatarUrl: profile?.avatar_url ? String(profile.avatar_url) : null,
+      letterDate: String(letter.letter_date),
+      body: String(letter.body),
+      selfMoodValue: Number(letter.self_mood_value),
+      mealValue: Number(letter.meal_value),
+      healthValue: Number(letter.health_value),
+      sevenCharLine: String(letter.seven_char_line),
+      hasOpened: ownLetter || Boolean(response),
+      openResponseText: response?.response_text ? String(response.response_text) : null,
+    };
+  });
+
+  return { date, currentUserId: userId, letters };
 }
