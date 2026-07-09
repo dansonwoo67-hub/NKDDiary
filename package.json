@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "playwright test",
+    "test:e2e": "tsx scripts/run-playwright-e2e.ts",
     "seed:couple-users": "tsx scripts/seed-couple-users.ts"
   },
   "dependencies": {

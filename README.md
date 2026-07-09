@@ -1,36 +1,95 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NKD Diary
 
-## Getting Started
+一个只给两个人使用的私密情侣日记站。
 
-First, run the development server:
+第一版核心闭环：
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+写信 → 七字引子 → 三字接住 → 展信 → 划线评点 → 回复提醒 → 月历回看
+
+## 本地运行
+
+1. 安装依赖：
+
+```powershell
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. 复制环境变量：
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```powershell
+Copy-Item .env.local.example .env.local
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+3. 填写 `.env.local`：
 
-## Learn More
+```dotenv
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SECRET_KEY=
+COUPLE_USER_A_EMAIL=
+COUPLE_USER_A_PASSWORD=
+COUPLE_USER_A_DISPLAY_NAME=
+COUPLE_USER_B_EMAIL=
+COUPLE_USER_B_PASSWORD=
+COUPLE_USER_B_DISPLAY_NAME=
+NEXT_PUBLIC_RELATIONSHIP_START_DATE=2024-01-01
+```
 
-To learn more about Next.js, take a look at the following resources:
+`SUPABASE_SECRET_KEY` 只能放在服务端环境变量里，绝对不要改名成 `NEXT_PUBLIC_*`。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4. 启动：
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```powershell
+npm run dev
+```
 
-## Deploy on Vercel
+## Supabase 设置
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. 创建 Supabase 项目。
+2. 在 SQL Editor 执行：
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```text
+supabase/migrations/202607100001_initial_schema.sql
+```
+
+3. 回到本地运行：
+
+```powershell
+npm run seed:couple-users
+```
+
+这会创建或更新两个固定账号，并写入 `profiles`。
+
+## 常用命令
+
+```powershell
+npm run test
+npm run lint
+npm run build
+npm run test:e2e
+```
+
+如果没有配置真实 Supabase 项目和两人账号，E2E 中需要真实账号的场景会自动跳过。
+
+## 部署到 Vercel
+
+1. 把仓库推到 GitHub。
+2. 在 Vercel 导入项目。
+3. 设置环境变量：
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_SECRET_KEY`
+   - `COUPLE_USER_A_EMAIL`
+   - `COUPLE_USER_A_PASSWORD`
+   - `COUPLE_USER_A_DISPLAY_NAME`
+   - `COUPLE_USER_B_EMAIL`
+   - `COUPLE_USER_B_PASSWORD`
+   - `COUPLE_USER_B_DISPLAY_NAME`
+   - `NEXT_PUBLIC_RELATIONSHIP_START_DATE`
+4. 部署。
+
+## 视觉素材
+
+当前代码只放了“小王子手绘风”的色调、纸感、星球/玫瑰氛围和静态素材位，不硬编码第三方版权原图。
+
+后续如果你有自己准备的背景图，可以放入 `public/` 后再接到首页背景。
