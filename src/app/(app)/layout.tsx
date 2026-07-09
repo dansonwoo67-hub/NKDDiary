@@ -28,6 +28,9 @@ async function AuthenticatedAppLayout({ children }: { children: React.ReactNode 
           <Link href="/write" className="rounded-full bg-white/70 px-3 py-1">
             写信
           </Link>
+          <Link href="/calendar" className="rounded-full bg-white/70 px-3 py-1">
+            日历
+          </Link>
           <Link href="/settings" className="rounded-full bg-white/70 px-3 py-1">
             设置
           </Link>

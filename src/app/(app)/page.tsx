@@ -1,6 +1,11 @@
 import { HomeHero } from "@/features/home/components/HomeHero";
+import { getMonthCalendarState } from "@/features/calendar/actions";
+import { MonthHeatmap } from "@/features/home/components/MonthHeatmap";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const now = new Date();
+  const calendarState = await getMonthCalendarState(now.getFullYear(), now.getMonth() + 1);
+
   return (
     <div className="flex flex-1 flex-col gap-8">
       <HomeHero
@@ -17,6 +22,8 @@ export default function HomePage() {
           亲密关系里，稳定的回应比盛大的承诺更有力量。
         </p>
       </section>
+
+      <MonthHeatmap state={calendarState} />
     </div>
   );
 }

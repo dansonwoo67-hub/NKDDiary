@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/features/profile/actions";
+import { resolveRecurringEventDate } from "@/features/calendar/recurrence";
 
 export type CalendarEventInput = {
   name: string;
@@ -11,6 +12,26 @@ export type CalendarEventInput = {
   recurrence: "none" | "monthly" | "yearly";
   icon: string;
   color: "rose" | "gold" | "blue" | "green" | "purple";
+};
+
+export type CalendarEventChip = {
+  id: string;
+  name: string;
+  icon: string;
+  color: "rose" | "gold" | "blue" | "green" | "purple";
+};
+
+export type MonthCalendarDay = {
+  date: string;
+  dayOfMonth: number;
+  recordCount: number;
+  events: CalendarEventChip[];
+};
+
+export type MonthCalendarState = {
+  year: number;
+  month: number;
+  days: MonthCalendarDay[];
 };
 
 const RECURRENCE_VALUES = new Set(["none", "monthly", "yearly"]);
@@ -60,4 +81,128 @@ export async function createCalendarEventFromForm(formData: FormData) {
     icon: String(formData.get("icon") ?? "🌹"),
     color: String(formData.get("color") ?? "rose") as CalendarEventInput["color"],
   });
+}
+
+function toDateString(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function monthBounds(year: number, month: number) {
+  const start = new Date(year, month - 1, 1);
+  const end = new Date(year, month, 0);
+  return { start, end };
+}
+
+function eventOccurrenceDate(eventDate: string, recurrence: string, year: number, month: number) {
+  const original = new Date(`${eventDate}T00:00:00+08:00`);
+
+  if (recurrence === "none") {
+    return original.getFullYear() === year && original.getMonth() === month - 1 ? toDateString(original) : null;
+  }
+
+  if (recurrence === "monthly") {
+    return toDateString(resolveRecurringEventDate(original, year, month - 1));
+  }
+
+  if (recurrence === "yearly" && original.getMonth() === month - 1) {
+    return toDateString(resolveRecurringEventDate(original, year, month - 1));
+  }
+
+  return null;
+}
+
+async function ensureTodayEventNotifications(events: Array<{ id: string; name: string; eventDate: string }>) {
+  if (events.length === 0) return;
+
+  const supabase = await createServerSupabaseClient();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(todayStart);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const { data: profiles } = await supabase.from("profiles").select("id");
+
+  for (const event of events) {
+    for (const profile of profiles ?? []) {
+      const { data: existing } = await supabase
+        .from("notifications")
+        .select("id")
+        .eq("recipient_id", String(profile.id))
+        .eq("source_id", event.id)
+        .gte("created_at", todayStart.toISOString())
+        .lt("created_at", tomorrow.toISOString())
+        .maybeSingle();
+
+      if (!existing) {
+        await supabase.from("notifications").insert({
+          recipient_id: String(profile.id),
+          type: "calendar_event",
+          source_id: event.id,
+          title: "今日提醒",
+          body: event.name,
+        });
+      }
+    }
+  }
+}
+
+export async function getMonthCalendarState(year: number, month: number): Promise<MonthCalendarState> {
+  await requireUser();
+  const supabase = await createServerSupabaseClient();
+  const { start, end } = monthBounds(year, month);
+  const startDate = toDateString(start);
+  const endDate = toDateString(end);
+
+  const [{ data: letters, error: lettersError }, { data: events, error: eventsError }] = await Promise.all([
+    supabase.from("letters").select("letter_date").gte("letter_date", startDate).lte("letter_date", endDate),
+    supabase.from("calendar_events").select("id, name, event_date, recurrence, icon, color").order("event_date", { ascending: true }),
+  ]);
+
+  if (lettersError) throw new Error(lettersError.message);
+  if (eventsError) throw new Error(eventsError.message);
+
+  const recordCounts = new Map<string, number>();
+  for (const letter of letters ?? []) {
+    const key = String(letter.letter_date);
+    recordCounts.set(key, (recordCounts.get(key) ?? 0) + 1);
+  }
+
+  const eventsByDate = new Map<string, CalendarEventChip[]>();
+  const today = toDateString(new Date());
+  const dueToday: Array<{ id: string; name: string; eventDate: string }> = [];
+
+  for (const event of events ?? []) {
+    const occurrence = eventOccurrenceDate(String(event.event_date), String(event.recurrence), year, month);
+    if (!occurrence) continue;
+
+    const chip = {
+      id: String(event.id),
+      name: String(event.name),
+      icon: String(event.icon),
+      color: String(event.color) as CalendarEventChip["color"],
+    };
+    eventsByDate.set(occurrence, [...(eventsByDate.get(occurrence) ?? []), chip]);
+
+    if (occurrence === today) {
+      dueToday.push({ id: chip.id, name: chip.name, eventDate: occurrence });
+    }
+  }
+
+  await ensureTodayEventNotifications(dueToday);
+
+  const days: MonthCalendarDay[] = [];
+  for (let day = 1; day <= end.getDate(); day += 1) {
+    const date = toDateString(new Date(year, month - 1, day));
+    days.push({
+      date,
+      dayOfMonth: day,
+      recordCount: recordCounts.get(date) ?? 0,
+      events: eventsByDate.get(date) ?? [],
+    });
+  }
+
+  return { year, month, days };
 }
