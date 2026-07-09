@@ -20,7 +20,7 @@ npm install
 Copy-Item .env.local.example .env.local
 ```
 
-3. 填写 `.env.local`：
+3. 填写 `.env.local`。前两项已经是 Supabase 项目的公开配置；`SUPABASE_SECRET_KEY` 和两个人账号只用于本地执行种子脚本：
 
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=
@@ -35,7 +35,7 @@ COUPLE_USER_B_DISPLAY_NAME=
 NEXT_PUBLIC_RELATIONSHIP_START_DATE=2024-01-01
 ```
 
-`SUPABASE_SECRET_KEY` 只能放在服务端环境变量里，绝对不要改名成 `NEXT_PUBLIC_*`。
+`SUPABASE_SECRET_KEY` 只能放在本地或服务端环境变量里，绝对不要改名成 `NEXT_PUBLIC_*`，也不要提交到 Git。
 
 4. 启动：
 
@@ -46,10 +46,11 @@ npm run dev
 ## Supabase 设置
 
 1. 创建 Supabase 项目。
-2. 在 SQL Editor 执行：
+2. 在 SQL Editor 按文件名顺序执行 `supabase/migrations/` 里的迁移文件。当前包括：
 
 ```text
 supabase/migrations/202607100001_initial_schema.sql
+supabase/migrations/202607100002_harden_security_and_indexes.sql
 ```
 
 3. 回到本地运行：
@@ -75,18 +76,13 @@ npm run test:e2e
 
 1. 把仓库推到 GitHub。
 2. 在 Vercel 导入项目。
-3. 设置环境变量：
+3. 设置网页运行需要的环境变量：
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-   - `SUPABASE_SECRET_KEY`
-   - `COUPLE_USER_A_EMAIL`
-   - `COUPLE_USER_A_PASSWORD`
-   - `COUPLE_USER_A_DISPLAY_NAME`
-   - `COUPLE_USER_B_EMAIL`
-   - `COUPLE_USER_B_PASSWORD`
-   - `COUPLE_USER_B_DISPLAY_NAME`
    - `NEXT_PUBLIC_RELATIONSHIP_START_DATE`
 4. 部署。
+
+两个人的邮箱、密码和 `SUPABASE_SECRET_KEY` 只用于本地执行 `npm run seed:couple-users`，不需要放进 Vercel。
 
 ## 视觉素材
 
