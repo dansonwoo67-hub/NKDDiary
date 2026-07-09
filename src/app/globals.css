@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #fff8ea;
+  --paper-deep: #f4e3bf;
+  --ink: #47382d;
+  --muted-ink: #8b7564;
+  --rose: #e58b8f;
+  --star: #f7cc6b;
+  --planet: #d8e7cc;
+  --soft-blue: #b9d3e8;
+  --shadow-soft: 0 22px 80px rgb(83 61 43 / 14%);
+}
+
+@theme inline {
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+}
+
+html {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 12%, rgb(247 204 107 / 26%), transparent 26rem),
+    radial-gradient(circle at 86% 22%, rgb(185 211 232 / 30%), transparent 24rem),
+    linear-gradient(180deg, #fff8ea 0%, #f7ead4 100%);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.hand-card {
+  border: 1px solid rgb(71 56 45 / 14%);
+  background: rgb(255 248 234 / 76%);
+  box-shadow: var(--shadow-soft);
+  backdrop-filter: blur(10px);
+}
