@@ -4,69 +4,93 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/features/profile/actions";
+import {
+  createAnnotation,
+  type AnnotationGateway,
+  type CreateAnnotationInput,
+} from "@/features/annotations/create-annotation-core";
 
-export async function createAnnotationAction(input: {
-  letterId: string;
-  quotedText: string;
-  startOffset: number;
-  endOffset: number;
-  comment: string;
-}): Promise<ActionResult> {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export async function createAnnotationAction(input: CreateAnnotationInput): Promise<ActionResult> {
   const { userId, profile } = await requireUser();
   const supabase = await createServerSupabaseClient();
-  const quotedText = input.quotedText.trim();
-  const comment = input.comment.trim();
+  const gateway: AnnotationGateway = {
+    async getPublishedLetter(letterId) {
+      const { data, error } = await supabase
+        .from("letters")
+        .select("id, author_id, letter_date, body_json, body_text")
+        .eq("id", letterId)
+        .eq("status", "published")
+        .maybeSingle();
+      if (error || !data) return null;
+      return {
+        id: String(data.id),
+        authorId: String(data.author_id),
+        letterDate: String(data.letter_date),
+        bodyJson: data.body_json,
+        bodyText: data.body_text === null ? null : String(data.body_text),
+      };
+    },
+    async insertAnnotation(annotation) {
+      const { error } = await supabase.from("annotations").insert({
+        letter_id: annotation.letterId,
+        author_id: annotation.authorId,
+        block_id: annotation.blockId,
+        quoted_text: annotation.quotedText,
+        start_offset: annotation.startOffset,
+        end_offset: annotation.endOffset,
+        comment: annotation.comment,
+      });
+      return error ? { ok: false, message: error.message } : { ok: true };
+    },
+    async createNotification(notification) {
+      const { error } = await supabase.from("notifications").insert({
+        recipient_id: notification.recipientId,
+        type: "annotation",
+        source_id: notification.letterId,
+        title: notification.title,
+        body: notification.body,
+      });
+      return error ? { ok: false, message: error.message } : { ok: true };
+    },
+  };
 
-  if (!quotedText) return { ok: false, message: "请先选中要评点的文字。" };
-  if (!comment || comment.length > 2000) return { ok: false, message: "评点需要 1 到 2000 个字。" };
-
-  const { data: letter, error: letterError } = await supabase
-    .from("letters")
-    .select("id, author_id, letter_date")
-    .eq("id", input.letterId)
-    .single();
-
-  if (letterError || !letter) return { ok: false, message: letterError?.message ?? "没有找到这封信。" };
-
-  const { error } = await supabase.from("annotations").insert({
-    letter_id: input.letterId,
-    author_id: userId,
-    quoted_text: quotedText,
-    start_offset: input.startOffset,
-    end_offset: input.endOffset,
-    comment,
+  const result = await createAnnotation(input, {
+    userId,
+    displayName: profile.display_name,
+    gateway,
   });
+  if (!result.ok) return result;
 
-  if (error) return { ok: false, message: error.message };
-
-  if (String(letter.author_id) !== userId) {
-    await supabase.from("notifications").insert({
-      recipient_id: String(letter.author_id),
-      type: "annotation",
-      source_id: input.letterId,
-      title: `${profile.display_name} 评点了你的信`,
-      body: quotedText.slice(0, 60),
-    });
-  }
-
-  revalidatePath(`/letters/${String(letter.letter_date)}`);
-  return { ok: true, message: "评点已留下。" };
+  revalidatePath(`/letters/${result.letterDate}`);
+  return { ok: true, message: result.message };
 }
 
 export async function createAnnotationReplyAction(input: { annotationId: string; body: string }): Promise<ActionResult> {
+  if (input === null || typeof input !== "object" ||
+    typeof input.annotationId !== "string" || !UUID_PATTERN.test(input.annotationId) ||
+    typeof input.body !== "string") {
+    return { ok: false, message: "回复内容或评点编号无效。" };
+  }
+  const body = input.body.trim();
+  if (!body || body.length > 2000) return { ok: false, message: "回复需要 1 到 2000 个字。" };
+
   const { userId, profile } = await requireUser();
   const supabase = await createServerSupabaseClient();
-  const body = input.body.trim();
-
-  if (!body || body.length > 2000) return { ok: false, message: "回复需要 1 到 2000 个字。" };
 
   const { data: annotation, error: annotationError } = await supabase
     .from("annotations")
-    .select("id, author_id, letter_id, letters(letter_date, author_id)")
+    .select("id, author_id, letter_id, letters(letter_date, author_id, status)")
     .eq("id", input.annotationId)
     .single();
 
   if (annotationError || !annotation) return { ok: false, message: annotationError?.message ?? "没有找到这条评点。" };
+
+  const letter = Array.isArray(annotation.letters) ? annotation.letters[0] : annotation.letters;
+  if (!letter || String(letter.status) !== "published") {
+    return { ok: false, message: "这封信当前无法回复评点。" };
+  }
 
   const { error } = await supabase.from("annotation_replies").insert({
     annotation_id: input.annotationId,
@@ -76,7 +100,6 @@ export async function createAnnotationReplyAction(input: { annotationId: string;
 
   if (error) return { ok: false, message: error.message };
 
-  const letter = Array.isArray(annotation.letters) ? annotation.letters[0] : annotation.letters;
   const recipientId = String(annotation.author_id) === userId ? String(letter?.author_id) : String(annotation.author_id);
 
   if (recipientId && recipientId !== userId) {

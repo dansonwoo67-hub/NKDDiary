@@ -1,10 +1,13 @@
 import { expect, test } from "@playwright/test";
 
-const hasCoupleAccounts =
-  Boolean(process.env.COUPLE_USER_A_EMAIL) &&
-  Boolean(process.env.COUPLE_USER_A_PASSWORD) &&
-  Boolean(process.env.COUPLE_USER_B_EMAIL) &&
-  Boolean(process.env.COUPLE_USER_B_PASSWORD);
+const mutationSuiteReady =
+  process.env.E2E_ALLOW_MUTATIONS === "I_UNDERSTAND_TEST_DATA_WILL_BE_DELETED" &&
+  process.env.E2E_MUTATIONS_SUPERVISED === "1" &&
+  Boolean(process.env.E2E_ACTIVE_SUPABASE_URL) &&
+  Boolean(process.env.E2E_TEST_USER_A_EMAIL) &&
+  Boolean(process.env.E2E_TEST_USER_A_PASSWORD) &&
+  Boolean(process.env.E2E_TEST_USER_B_EMAIL) &&
+  Boolean(process.env.E2E_TEST_USER_B_PASSWORD);
 
 test.describe("couple diary", () => {
   test("login page offers sign-in but no registration", async ({ page }) => {
@@ -15,45 +18,63 @@ test.describe("couple diary", () => {
     await expect(page.getByRole("button", { name: /注册|sign up/i })).toHaveCount(0);
   });
 
-  test("happy path: write, respond, open, comment", async ({ page, context }) => {
-    test.skip(!hasCoupleAccounts, "Needs real Supabase project and seeded couple accounts.");
+  test.describe("guarded mutation flows", () => {
+    test.describe.configure({ mode: "serial" });
 
-    const today = new Date().toISOString().slice(0, 10);
+    test.beforeEach(({}, testInfo) => {
+      test.skip(!mutationSuiteReady, "Mutation E2E requires the supervised dedicated test backend.");
+      test.skip(testInfo.project.name !== "chromium", "Mutation E2E runs only in the desktop Chromium project.");
+    });
 
-    await page.goto("/login");
-    await page.getByLabel("邮箱").fill(process.env.COUPLE_USER_A_EMAIL!);
-    await page.getByLabel("密码").fill(process.env.COUPLE_USER_A_PASSWORD!);
-    await page.getByRole("button", { name: "进入日记" }).click();
-    await page.getByRole("link", { name: "写信" }).click();
-    await page.getByLabel("正文").fill("今天也想好好和你说话。");
-    await page.getByLabel("今日七字信").fill("想见你");
-    await page.getByRole("button", { name: "保存今天的信" }).click();
-    await expect(page.getByText("今天的信保存好啦。")).toBeVisible();
+    test("daily letter flushes its final line before publishing", async ({ page }) => {
+      await page.goto("/login");
+      await page.getByLabel("邮箱").fill(process.env.E2E_TEST_USER_A_EMAIL!);
+      await page.getByLabel("密码").fill(process.env.E2E_TEST_USER_A_PASSWORD!);
+      await page.getByRole("button", { name: "进入日记" }).click();
+      await page.getByRole("button", { name: "写一封信" }).click();
+      await page.getByRole("button", { name: "写今天的信" }).click();
+      for (let step = 0; step < 3; step += 1) {
+        await page.getByRole("button", { name: "选好了，继续" }).click();
+      }
+      await page.getByLabel("称呼").fill("亲爱的");
+      await page.getByRole("button", { name: "开始写信" }).click();
+      await page.getByLabel("编辑信件正文").fill("今天也想好好和你说话。");
+      await page.getByLabel("总而言之，我想跟你说").fill("想见你");
+      await page.getByRole("button", { name: "寄出" }).click();
+      await expect(page.getByText("寄出后不能修改，24小时内可以撤回。")).toBeVisible();
+      await page.getByRole("button", { name: "确认寄出" }).click();
+      await expect(page.getByRole("link", { name: "查看今天的信" })).toBeVisible();
+    });
 
-    await context.clearCookies();
-    await page.goto("/login");
-    await page.getByLabel("邮箱").fill(process.env.COUPLE_USER_B_EMAIL!);
-    await page.getByLabel("密码").fill(process.env.COUPLE_USER_B_PASSWORD!);
-    await page.getByRole("button", { name: "进入日记" }).click();
-    await page.goto(`/letters/${today}`);
-    await expect(page.getByText("想见你")).toBeVisible();
-    await page.getByPlaceholder("三个字").fill("抱抱");
-    await page.getByRole("button", { name: "展信" }).click();
-    await expect(page.getByText("今天也想好好和你说话。")).toBeVisible();
-    await page.getByText("今天也想好好和你说话。").selectText();
-    await page.getByRole("button", { name: "评点选中文字" }).click();
-    await page.getByPlaceholder("写下你的评点").fill("我也想听你慢慢说。");
-    await page.getByRole("button", { name: "留下评点" }).click();
-    await expect(page.getByText("评点已留下。")).toBeVisible();
-  });
+    test("future letter skips the ritual and locks after scheduling", async ({ page }) => {
+      await page.goto("/login");
+      await page.getByLabel("邮箱").fill(process.env.E2E_TEST_USER_B_EMAIL!);
+      await page.getByLabel("密码").fill(process.env.E2E_TEST_USER_B_PASSWORD!);
+      await page.getByRole("button", { name: "进入日记" }).click();
+      await page.getByRole("button", { name: "写一封信" }).click();
+      await page.getByRole("button", { name: "写给未来" }).click();
+      await page.getByLabel("送达日期").fill("2099-08-01T08:30");
+      await page.getByRole("button", { name: "确认送达时间" }).click();
+      await page.getByLabel("称呼").fill("未来的你");
+      await page.getByRole("button", { name: "开始写信" }).click();
+      await page.getByLabel("编辑信件正文").fill("等到那一天，再读这封信。");
+      await page.getByLabel("总而言之，我想跟你说").fill("未来见");
+      await page.getByRole("button", { name: "放进时间胶囊" }).click();
+      await expect(page.getByText(/将在 2099年8月1日 08:30 自动送达/)).toBeVisible();
+      await page.getByRole("button", { name: "确认放进时间胶囊" }).click();
+      await expect(page.getByLabel("编辑信件正文")).toHaveCount(0);
+    });
 
-  test("locked letters expose no delete control", async ({ page }) => {
-    test.skip(!hasCoupleAccounts, "Needs real Supabase project, seeded accounts, and a locked letter fixture.");
-
-    await page.goto("/write");
-    await expect(page.getByRole("button", { name: "已封存" })).toBeVisible();
-    await expect(page.getByRole("button", { name: /删除/ })).toHaveCount(0);
-    await page.goto("/");
-    await expect(page.getByText("删除")).toHaveCount(0);
+    test("locked letters expose no delete control", async ({ page }) => {
+      await page.goto("/login");
+      await page.getByLabel("邮箱").fill(process.env.E2E_TEST_USER_A_EMAIL!);
+      await page.getByLabel("密码").fill(process.env.E2E_TEST_USER_A_PASSWORD!);
+      await page.getByRole("button", { name: "进入日记" }).click();
+      await page.goto("/write");
+      await expect(page.getByRole("button", { name: "已封存" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /删除/ })).toHaveCount(0);
+      await page.goto("/");
+      await expect(page.getByText("删除")).toHaveCount(0);
+    });
   });
 });

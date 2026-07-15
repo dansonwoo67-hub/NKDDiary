@@ -4,8 +4,10 @@
   --paper: #fff8ea;
   --paper-deep: #f4e3bf;
   --ink: #47382d;
-  --muted-ink: #8b7564;
+  --muted-ink: #6f5949;
   --rose: #e58b8f;
+  --rose-ink: #8d3540;
+  --focus-ring: #78313a;
   --star: #f7cc6b;
   --planet: #d8e7cc;
   --soft-blue: #b9d3e8;
@@ -25,11 +27,49 @@ html {
 }
 
 body {
-  min-height: 100vh;
+  min-height: 100dvh;
   background:
     radial-gradient(circle at 18% 12%, rgb(247 204 107 / 26%), transparent 26rem),
     radial-gradient(circle at 86% 22%, rgb(185 211 232 / 30%), transparent 24rem),
     linear-gradient(180deg, #fff8ea 0%, #f7ead4 100%);
+}
+
+.letter-modal-panel {
+  background:
+    linear-gradient(rgb(255 248 234 / 93%), rgb(255 248 234 / 93%)),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0,
+      transparent 31px,
+      rgb(139 117 100 / 10%) 31px,
+      rgb(139 117 100 / 10%) 32px
+    );
+  animation: letter-modal-arrive 220ms ease-out both;
+}
+
+.letter-step {
+  animation: letter-step-arrive 180ms ease-out both;
+}
+
+@keyframes letter-modal-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+}
+
+@keyframes letter-step-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .letter-modal-panel,
+  .letter-step {
+    animation: none;
+  }
 }
 
 button,

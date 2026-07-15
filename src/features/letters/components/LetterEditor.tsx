@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { EventDialog } from "@/features/calendar/components/EventDialog";
 import { saveLetterAction, type EditorLetterState } from "@/features/letters/actions";
 import { LetterSliders, type LetterSliderValues } from "@/features/letters/components/LetterSliders";
 
@@ -87,10 +86,6 @@ export function LetterEditor({ state }: { state: EditorLetterState }) {
             className="mt-2 w-full rounded-[1.5rem] border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 leading-7 outline-none"
           />
         </label>
-
-        <div className="mt-6">
-          <EventDialog defaultDate={state.today} />
-        </div>
 
         <label className="mt-6 block text-sm text-[var(--ink)]">
           今日七字信
