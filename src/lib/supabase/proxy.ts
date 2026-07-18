@@ -9,6 +9,8 @@ function isAuthRoute(pathname: string) {
 
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
+  if (request.nextUrl.pathname === "/api/e2e-health") return response;
+
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth/require-user";
 import { signOutAction } from "@/features/auth/actions";
 import { NotificationBell } from "@/features/notifications/components/NotificationBell";
+import { DetachedAssetCleanup } from "@/features/letters/components/DetachedAssetCleanup";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +15,11 @@ export default function AppLayout({
 }
 
 async function AuthenticatedAppLayout({ children }: { children: React.ReactNode }) {
-  const { profile } = await requireUser();
+  const { profile, userId } = await requireUser();
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-6">
+      <DetachedAssetCleanup userId={userId} />
       <nav className="mb-6 flex items-center justify-between rounded-full bg-white/50 px-4 py-3 text-sm text-[var(--ink)] shadow-sm">
         <Link href="/" className="font-semibold">
           NKD Diary
@@ -30,6 +32,9 @@ async function AuthenticatedAppLayout({ children }: { children: React.ReactNode 
           </Link>
           <Link href="/calendar" className="rounded-full bg-white/70 px-3 py-1">
             日历
+          </Link>
+          <Link href="/me" className="rounded-full bg-white/70 px-3 py-1">
+            个人中心
           </Link>
           <Link href="/settings" className="rounded-full bg-white/70 px-3 py-1">
             设置

@@ -2,10 +2,18 @@ import { createCalendarEventFromForm } from "@/features/calendar/actions";
 
 export const EVENT_ICONS = ["🌹", "🎂", "✈️", "💌", "🩸", "⭐", "🍽️", "🏥"];
 
-export function EventDialog({ defaultDate }: { defaultDate: string }) {
+export function EventDialog({
+  defaultDate,
+  defaultOpen = false,
+  summary = "顺手记到日历",
+}: {
+  defaultDate: string;
+  defaultOpen?: boolean;
+  summary?: string;
+}) {
   return (
-    <details className="rounded-[1.5rem] border border-[rgb(71_56_45_/_14%)] bg-white/45 p-4">
-      <summary className="cursor-pointer text-sm font-medium text-[var(--ink)]">顺手记到日历</summary>
+    <details open={defaultOpen} className="rounded-[1.5rem] border border-[rgb(71_56_45_/_14%)] bg-white/45 p-4">
+      <summary className="cursor-pointer text-sm font-medium text-[var(--ink)]">{summary}</summary>
       <form action={createCalendarEventFromForm} className="mt-4 grid gap-4">
         <label className="text-sm">
           事件名称

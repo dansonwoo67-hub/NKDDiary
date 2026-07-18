@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 export type Profile = {
@@ -14,7 +15,7 @@ export type Profile = {
   updated_at: string;
 };
 
-export async function requireUser(): Promise<{ userId: string; profile: Profile }> {
+export const requireUser = cache(async function requireUser(): Promise<{ userId: string; profile: Profile }> {
   const supabase = await createServerSupabaseClient();
   const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
   const userId = claimsData?.claims?.sub;
@@ -34,4 +35,4 @@ export async function requireUser(): Promise<{ userId: string; profile: Profile 
   }
 
   return { userId, profile: profile as Profile };
-}
+});

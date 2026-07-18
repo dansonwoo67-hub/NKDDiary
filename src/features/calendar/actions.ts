@@ -114,41 +114,6 @@ function eventOccurrenceDate(eventDate: string, recurrence: string, year: number
   return null;
 }
 
-async function ensureTodayEventNotifications(events: Array<{ id: string; name: string; eventDate: string }>) {
-  if (events.length === 0) return;
-
-  const supabase = await createServerSupabaseClient();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(todayStart);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const { data: profiles } = await supabase.from("profiles").select("id");
-
-  for (const event of events) {
-    for (const profile of profiles ?? []) {
-      const { data: existing } = await supabase
-        .from("notifications")
-        .select("id")
-        .eq("recipient_id", String(profile.id))
-        .eq("source_id", event.id)
-        .gte("created_at", todayStart.toISOString())
-        .lt("created_at", tomorrow.toISOString())
-        .maybeSingle();
-
-      if (!existing) {
-        await supabase.from("notifications").insert({
-          recipient_id: String(profile.id),
-          type: "calendar_event",
-          source_id: event.id,
-          title: "今日提醒",
-          body: event.name,
-        });
-      }
-    }
-  }
-}
-
 export async function getMonthCalendarState(year: number, month: number): Promise<MonthCalendarState> {
   await requireUser();
   const supabase = await createServerSupabaseClient();
@@ -171,9 +136,6 @@ export async function getMonthCalendarState(year: number, month: number): Promis
   }
 
   const eventsByDate = new Map<string, CalendarEventChip[]>();
-  const today = toDateString(new Date());
-  const dueToday: Array<{ id: string; name: string; eventDate: string }> = [];
-
   for (const event of events ?? []) {
     const occurrence = eventOccurrenceDate(String(event.event_date), String(event.recurrence), year, month);
     if (!occurrence) continue;
@@ -186,12 +148,7 @@ export async function getMonthCalendarState(year: number, month: number): Promis
     };
     eventsByDate.set(occurrence, [...(eventsByDate.get(occurrence) ?? []), chip]);
 
-    if (occurrence === today) {
-      dueToday.push({ id: chip.id, name: chip.name, eventDate: occurrence });
-    }
   }
-
-  await ensureTodayEventNotifications(dueToday);
 
   const days: MonthCalendarDay[] = [];
   for (let day = 1; day <= end.getDate(); day += 1) {
