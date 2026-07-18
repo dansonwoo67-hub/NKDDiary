@@ -20,11 +20,25 @@ export type MembershipRow = {
   active: boolean;
 };
 
+const PRIVATE_SPACE_ACCESS_ERROR = "无权访问这个私人空间";
+
+export function assertLegacyCoupleMembership(appMetadata: unknown): void {
+  const isLegacyMember =
+    typeof appMetadata === "object" &&
+    appMetadata !== null &&
+    "nkd_diary_member" in appMetadata &&
+    appMetadata.nkd_diary_member === "true";
+
+  if (!isLegacyMember) {
+    throw new Error(PRIVATE_SPACE_ACCESS_ERROR);
+  }
+}
+
 export function resolveMembership(userId: string, rows: MembershipRow[]) {
   const membership = rows.find((row) => row.user_id === userId && row.active);
 
   if (!membership) {
-    throw new Error("鏃犳潈璁块棶杩欎釜绉佷汉绌洪棿");
+    throw new Error(PRIVATE_SPACE_ACCESS_ERROR);
   }
 
   return { userId, spaceId: membership.space_id };
@@ -45,6 +59,8 @@ export async function requireUser(): Promise<{ userId: string; profile: Profile;
   if (claimsError || !userId) {
     redirect("/login");
   }
+
+  assertLegacyCoupleMembership(claimsData?.claims?.app_metadata);
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")

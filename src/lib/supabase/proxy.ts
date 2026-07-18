@@ -3,8 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const PUBLIC_ROUTES = ["/login"];
 
-function isPublicRoute(pathname: string) {
-  return PUBLIC_ROUTES.some((route) => pathname.startsWith(route));
+export function isPublicRoute(pathname: string) {
+  return PUBLIC_ROUTES.includes(pathname);
 }
 
 export async function updateSession(request: NextRequest) {
