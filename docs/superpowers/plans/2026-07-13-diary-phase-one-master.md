@@ -1,4 +1,6 @@
-# NKD Diary Phase One Optimization Master Plan
+# NKD Diary Phase One Optimization Master Plan (Superseded)
+
+> **Superseded on 2026-07-19:** Do not execute this plan or its three linked child plans. Their scheduled automatic-publication and withdrawal rules conflict with the approved recipient-opened future-diary design. Use [`2026-07-19-couple-diary-rebuild.md`](./2026-07-19-couple-diary-rebuild.md) as the authoritative implementation plan.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -27,4 +29,3 @@
 3. [Inline interaction, personal center, and continuous calendar](./2026-07-13-diary-interaction-center-calendar.md)
 
 Each plan ends with a green unit-test/build checkpoint and a focused commit. Do not deploy between plans. After all three pass, run the final end-to-end and production checklist in Plan 3.
-
