@@ -1,5 +1,69 @@
-import { describe, expect, it } from "vitest";
-import { assertLegacyCoupleMembership, resolveMembership } from "./require-user";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("@/lib/supabase/server", () => ({ createServerSupabaseClient: vi.fn() }));
+
+import { redirect } from "next/navigation";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { assertLegacyCoupleMembership, requireUser, resolveMembership } from "./require-user";
+
+const profile = {
+  id: "user-1",
+  login_name: "nkd",
+  display_name: "NKD",
+  avatar_url: null,
+  last_login_at: null,
+  last_login_latitude: null,
+  last_login_longitude: null,
+  relationship_started_on: "2024-01-01",
+  created_at: "2024-01-01T00:00:00.000Z",
+  updated_at: "2024-01-01T00:00:00.000Z",
+};
+
+const mockCreateServerSupabaseClient = vi.mocked(createServerSupabaseClient);
+const mockRedirect = vi.mocked(redirect);
+
+function mockAuthenticatedClient(appMetadata: unknown) {
+  const single = vi.fn().mockResolvedValue({ data: profile, error: null });
+  const eq = vi.fn().mockReturnValue({ single });
+  const select = vi.fn().mockReturnValue({ eq });
+  const from = vi.fn().mockReturnValue({ select });
+
+  mockCreateServerSupabaseClient.mockResolvedValue({
+    auth: {
+      getClaims: vi.fn().mockResolvedValue({
+        data: { claims: { sub: "user-1", app_metadata: appMetadata } },
+        error: null,
+      }),
+    },
+    from,
+  } as never);
+
+  return { from };
+}
+
+describe("requireUser", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the transitional space only after an explicit legacy membership marker", async () => {
+    mockAuthenticatedClient({ nkd_diary_member: "true" });
+
+    await expect(requireUser()).resolves.toEqual({ userId: "user-1", profile, spaceId: "legacy-couple-space" });
+    expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["false", { nkd_diary_member: "false" }],
+  ])("rejects a %s legacy membership marker before attempting profile access", async (_label, appMetadata) => {
+    const { from } = mockAuthenticatedClient(appMetadata);
+
+    await expect(requireUser()).rejects.toThrow("无权访问这个私人空间");
+    expect(from).not.toHaveBeenCalled();
+  });
+});
 
 describe("assertLegacyCoupleMembership", () => {
   it("rejects users whose legacy membership marker is missing", () => {
