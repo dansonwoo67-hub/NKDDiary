@@ -27,6 +27,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             type="email"
             autoComplete="email"
             required
+            aria-describedby={error ? "login-error" : undefined}
+            aria-invalid={Boolean(error)}
             className="mt-2 w-full rounded-2xl border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 outline-none"
           />
         </label>
@@ -38,11 +40,13 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             type="password"
             autoComplete="current-password"
             required
+            aria-describedby={error ? "login-error" : undefined}
+            aria-invalid={Boolean(error)}
             className="mt-2 w-full rounded-2xl border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 outline-none"
           />
         </label>
 
-        {error ? <p className="mt-4 rounded-2xl bg-[rgb(229_139_143_/_18%)] px-4 py-3 text-sm text-[var(--ink)]">{error}</p> : null}
+        {error ? <p id="login-error" className="mt-4 rounded-2xl bg-[rgb(229_139_143_/_18%)] px-4 py-3 text-sm text-[var(--ink)]">{error}</p> : null}
 
         <button className="mt-6 w-full rounded-full bg-[var(--ink)] px-5 py-3 text-white" type="submit">
           进入日记

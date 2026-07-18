@@ -32,6 +32,21 @@ body {
     linear-gradient(180deg, #fff8ea 0%, #f7ead4 100%);
 }
 
+a,
+button,
+input,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgb(229 139 143 / 62%);
+  outline-offset: 3px;
+}
+
 button,
 input,
 textarea {

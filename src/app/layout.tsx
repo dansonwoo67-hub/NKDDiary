@@ -2,8 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "NKD Diary",
-  description: "A private two-person couple diary.",
+  title: {
+    default: "NKD Diary",
+    template: "%s · NKD Diary",
+  },
+  description: "仅属于两个人的私密日记空间。",
 };
 
 export default function RootLayout({

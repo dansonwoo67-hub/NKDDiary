@@ -14,7 +14,30 @@ export type Profile = {
   updated_at: string;
 };
 
-export async function requireUser(): Promise<{ userId: string; profile: Profile }> {
+export type MembershipRow = {
+  user_id: string;
+  space_id: string;
+  active: boolean;
+};
+
+export function resolveMembership(userId: string, rows: MembershipRow[]) {
+  const membership = rows.find((row) => row.user_id === userId && row.active);
+
+  if (!membership) {
+    throw new Error("鏃犳潈璁块棶杩欎釜绉佷汉绌洪棿");
+  }
+
+  return { userId, spaceId: membership.space_id };
+}
+
+/**
+ * The deployed schema still authorizes the couple through profile RLS and the
+ * `nkd_diary_member` JWT claim. Task 2 will replace this transitional ID with
+ * a real active membership query and pass its rows through `resolveMembership`.
+ */
+const LEGACY_COUPLE_SPACE_ID = process.env.COUPLE_LEGACY_SPACE_ID ?? "legacy-couple-space";
+
+export async function requireUser(): Promise<{ userId: string; profile: Profile; spaceId: string }> {
   const supabase = await createServerSupabaseClient();
   const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
   const userId = claimsData?.claims?.sub;
@@ -33,5 +56,5 @@ export async function requireUser(): Promise<{ userId: string; profile: Profile 
     redirect("/login");
   }
 
-  return { userId, profile: profile as Profile };
+  return { userId, profile: profile as Profile, spaceId: LEGACY_COUPLE_SPACE_ID };
 }

@@ -15,27 +15,34 @@ export default function AppLayout({
 
 async function AuthenticatedAppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUser();
+  const today = new Date().toISOString().slice(0, 10);
+  const navigation = [
+    { href: "/", label: "首页" },
+    { href: "/write", label: "日记" },
+    { href: `/letters/${today}`, label: "回忆" },
+    { href: "/calendar", label: "日历" },
+    { href: "/", label: "心情" },
+    { href: "/settings", label: "设置" },
+  ];
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-6">
-      <nav className="mb-6 flex items-center justify-between rounded-full bg-white/50 px-4 py-3 text-sm text-[var(--ink)] shadow-sm">
+      <nav aria-label="主导航" className="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-white/60 px-4 py-3 text-sm text-[var(--ink)] shadow-sm backdrop-blur">
         <Link href="/" className="font-semibold">
           NKD Diary
         </Link>
-        <div className="flex items-center gap-3">
-          <span>{profile.display_name}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          {navigation.map((item) => (
+            <Link key={item.label} href={item.href} className="rounded-full px-3 py-1.5 transition hover:bg-white/80">
+              {item.label}
+            </Link>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden sm:inline">{profile.display_name}</span>
           <NotificationBell />
-          <Link href="/write" className="rounded-full bg-white/70 px-3 py-1">
-            写信
-          </Link>
-          <Link href="/calendar" className="rounded-full bg-white/70 px-3 py-1">
-            日历
-          </Link>
-          <Link href="/settings" className="rounded-full bg-white/70 px-3 py-1">
-            设置
-          </Link>
           <form action={signOutAction}>
-            <button className="rounded-full bg-[var(--ink)] px-3 py-1 text-white" type="submit">
+            <button className="rounded-full bg-[var(--ink)] px-3 py-1.5 text-white" type="submit">
               退出
             </button>
           </form>
