@@ -209,9 +209,10 @@ using (
   )
 );
 
+revoke all privileges on table public.spaces, public.space_members, public.journal_entries from anon, authenticated;
 grant select on public.spaces, public.space_members, public.journal_entries to authenticated;
 
-revoke execute on function public.enforce_two_active_space_members() from public;
-revoke execute on function public.preserve_journal_entry_immutability() from public;
-revoke execute on function public.is_active_space_member(uuid, uuid) from public;
+revoke execute on function public.enforce_two_active_space_members() from public, anon, authenticated;
+revoke execute on function public.preserve_journal_entry_immutability() from public, anon, authenticated;
+revoke execute on function public.is_active_space_member(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.is_active_space_member(uuid, uuid) to authenticated;

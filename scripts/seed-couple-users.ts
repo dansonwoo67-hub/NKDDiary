@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+
+const COUPLE_SPACE_ID = "00000000-0000-4000-8000-000000000001";
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function loadLocalEnv() {
   const envPath = path.join(process.cwd(), ".env.local");
@@ -28,105 +33,87 @@ function loadLocalEnv() {
   }
 }
 
-loadLocalEnv();
+export function validateSeedUserIds(userAId: string | undefined, userBId: string | undefined) {
+  if (!userAId || !UUID_PATTERN.test(userAId)) {
+    throw new Error("COUPLE_USER_A_ID must be a UUID");
+  }
 
-const required = [
-  "NEXT_PUBLIC_SUPABASE_URL",
-  "SUPABASE_SECRET_KEY",
-  "COUPLE_USER_A_DISPLAY_NAME",
-  "COUPLE_USER_B_DISPLAY_NAME",
-] as const;
+  if (!userBId || !UUID_PATTERN.test(userBId)) {
+    throw new Error("COUPLE_USER_B_ID must be a UUID");
+  }
 
-for (const key of required) {
-  if (!process.env[key]) {
+  const normalizedUserAId = userAId.toLowerCase();
+  const normalizedUserBId = userBId.toLowerCase();
+
+  if (normalizedUserAId === normalizedUserBId) {
+    throw new Error("COUPLE_USER_A_ID and COUPLE_USER_B_ID must be distinct");
+  }
+
+  return [normalizedUserAId, normalizedUserBId] as const;
+}
+
+function requireEnvironmentValue(key: string) {
+  const value = process.env[key];
+
+  if (!value) {
     throw new Error(`Missing ${key}`);
   }
+
+  return value;
 }
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY!, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+async function main() {
+  loadLocalEnv();
 
-const COUPLE_SPACE_ID = "00000000-0000-4000-8000-000000000001";
+  const userIds = validateSeedUserIds(
+    process.env.COUPLE_USER_A_ID,
+    process.env.COUPLE_USER_B_ID,
+  );
+  const supabaseUrl = requireEnvironmentValue("NEXT_PUBLIC_SUPABASE_URL");
+  const secretKey = requireEnvironmentValue("SUPABASE_SECRET_KEY");
+  const displayNames = [
+    requireEnvironmentValue("COUPLE_USER_A_DISPLAY_NAME"),
+    requireEnvironmentValue("COUPLE_USER_B_DISPLAY_NAME"),
+  ] as const;
 
-async function findUserByEmail(email: string) {
-  const { data, error } = await supabase.auth.admin.listUsers();
+  const supabase = createClient(supabaseUrl, secretKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 
-  if (error) {
-    throw error;
-  }
+  const authUsers = await Promise.all(
+    userIds.map(async (userId) => {
+      const { data, error } = await supabase.auth.admin.getUserById(userId);
 
-  return data.users.find((user) => user.email === email) ?? null;
-}
+      if (error || !data.user) {
+        throw error ?? new Error(`Cannot find pre-created Auth user ${userId}`);
+      }
 
-async function resolveUserId(email: string | undefined, password: string | undefined, suppliedId: string | undefined) {
-  if (suppliedId) {
-    const { data, error } = await supabase.auth.admin.getUserById(suppliedId);
+      return data.user;
+    }),
+  );
 
-    if (error || !data.user) {
-      throw error ?? new Error(`Cannot find supplied Auth user ${suppliedId}`);
+  for (const [index, user] of authUsers.entries()) {
+    const { error: metadataError } = await supabase.auth.admin.updateUserById(user.id, {
+      app_metadata: { nkd_diary_member: "true" },
+    });
+
+    if (metadataError) {
+      throw metadataError;
     }
 
-    return data.user.id;
+    const { error: profileError } = await supabase.from("profiles").upsert({
+      id: user.id,
+      login_name: index === 0 ? "user_a" : "user_b",
+      display_name: displayNames[index],
+      relationship_started_on:
+        process.env.NEXT_PUBLIC_RELATIONSHIP_START_DATE ?? "2024-01-01",
+    });
+
+    if (profileError) {
+      throw profileError;
+    }
   }
 
-  if (!email || !password) {
-    throw new Error("Supply a user ID, or both an email and password, for each couple member");
-  }
-
-  const { data: created, error: createError } = await supabase.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    app_metadata: { nkd_diary_member: "true" },
-  });
-
-  if (createError && !createError.message.toLowerCase().includes("already")) {
-    throw createError;
-  }
-
-  const existing = created.user ? null : await findUserByEmail(email);
-  const userId = created.user?.id ?? existing?.id;
-
-  if (!userId) {
-    throw new Error(`Cannot find user ${email}`);
-  }
-
-  return userId;
-}
-
-async function upsertUser(
-  email: string | undefined,
-  password: string | undefined,
-  suppliedId: string | undefined,
-  displayName: string,
-  loginName: string,
-) {
-  const userId = await resolveUserId(email, password, suppliedId);
-
-  const { error: metadataError } = await supabase.auth.admin.updateUserById(userId, {
-    app_metadata: { nkd_diary_member: "true" },
-  });
-
-  if (metadataError) {
-    throw metadataError;
-  }
-
-  const { error: profileError } = await supabase.from("profiles").upsert({
-    id: userId,
-    login_name: loginName,
-    display_name: displayName,
-    relationship_started_on: process.env.NEXT_PUBLIC_RELATIONSHIP_START_DATE ?? "2024-01-01",
-  });
-
-  if (profileError) {
-    throw profileError;
-  }
-
-  return userId;
-}
-
-async function upsertSpaceAndMembers(userIds: [string, string]) {
   const { error: spaceError } = await supabase.from("spaces").upsert({
     id: COUPLE_SPACE_ID,
     name: "Couple Diary",
@@ -151,31 +138,12 @@ async function upsertSpaceAndMembers(userIds: [string, string]) {
   }
 }
 
-async function main() {
-  const userAId = await upsertUser(
-    process.env.COUPLE_USER_A_EMAIL,
-    process.env.COUPLE_USER_A_PASSWORD,
-    process.env.COUPLE_USER_A_ID,
-    process.env.COUPLE_USER_A_DISPLAY_NAME!,
-    "user_a",
-  );
+const isDirectExecution =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
-  const userBId = await upsertUser(
-    process.env.COUPLE_USER_B_EMAIL,
-    process.env.COUPLE_USER_B_PASSWORD,
-    process.env.COUPLE_USER_B_ID,
-    process.env.COUPLE_USER_B_DISPLAY_NAME!,
-    "user_b",
-  );
-
-  if (userAId === userBId) {
-    throw new Error("The couple members must be two different Auth users");
-  }
-
-  await upsertSpaceAndMembers([userAId, userBId]);
+if (isDirectExecution) {
+  main().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }
-
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
