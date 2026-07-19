@@ -3,6 +3,8 @@
 import { useState, useTransition } from "react";
 import type { JournalActionResult } from "@/features/journal/actions";
 import { useDeadlineActive } from "@/features/journal/components/useDeadlineActive";
+import { uploadJournalImageAction } from "@/features/media/actions";
+import { ImagePicker } from "@/features/media/ImagePicker";
 
 export type TodayDiarySubmission = {
   title: string;
@@ -12,6 +14,7 @@ export type TodayDiarySubmission = {
 
 type TodayDiaryEditorProps = {
   today: string;
+  entryId?: string;
   action: (input: TodayDiarySubmission) => Promise<JournalActionResult>;
   initialValues?: Partial<Pick<TodayDiarySubmission, "title" | "content">>;
   submitLabel?: string;
@@ -24,6 +27,7 @@ function countCharacters(value: string) {
 
 export function TodayDiaryEditor({
   today,
+  entryId,
   action,
   initialValues,
   submitLabel = "发布今日日记",
@@ -31,6 +35,7 @@ export function TodayDiaryEditor({
 }: TodayDiaryEditorProps) {
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [content, setContent] = useState(initialValues?.content ?? "");
+  const [image, setImage] = useState<Blob | null>(null);
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -54,11 +59,29 @@ export function TodayDiaryEditor({
     }
 
     startTransition(async () => {
-      const result = await action({
+      const submission = {
         title: title.trim(),
         content: content.trim(),
         entryDate: today,
-      });
+      };
+      let result: JournalActionResult;
+      if (image) {
+        const formData = new FormData();
+        formData.set("image", image, "journal.webp");
+        result = await uploadJournalImageAction(
+          entryId
+            ? {
+                kind: "update-today",
+                entryId,
+                title: submission.title,
+                content: submission.content,
+              }
+            : { kind: "create-today", ...submission },
+          formData,
+        );
+      } else {
+        result = await action(submission);
+      }
       setIsError(!result.ok);
       setMessage(result.message);
     });
@@ -115,6 +138,8 @@ export function TodayDiaryEditor({
         <p id="today-diary-content-count" className="mt-2 text-right text-xs text-[var(--muted-ink)]">
           {countCharacters(content)}/20000
         </p>
+
+        <ImagePicker value={image} onChange={setImage} disabled={isPending} />
 
         {message ? (
           <p className="mt-5 rounded-2xl bg-white/60 px-4 py-3 text-sm text-[var(--muted-ink)]" role={isError ? "alert" : "status"}>

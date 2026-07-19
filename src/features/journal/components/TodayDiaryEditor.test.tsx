@@ -1,11 +1,29 @@
 import "@testing-library/jest-dom/vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/features/media/actions", () => ({ uploadJournalImageAction: vi.fn() }));
+vi.mock("@/features/media/compress-image", () => ({ compressJournalImage: vi.fn() }));
+
+import { uploadJournalImageAction } from "@/features/media/actions";
+import { compressJournalImage } from "@/features/media/compress-image";
 import { TodayDiaryEditor } from "./TodayDiaryEditor";
 
+const mockUploadImage = vi.mocked(uploadJournalImageAction);
+const mockCompressImage = vi.mocked(compressJournalImage);
+
 describe("TodayDiaryEditor", () => {
+  beforeEach(() => {
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:journal-preview"),
+      revokeObjectURL: vi.fn(),
+    });
+  });
+
   afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -61,6 +79,66 @@ describe("TodayDiaryEditor", () => {
     await waitFor(() => expect(action).toHaveBeenCalled());
     expect(action.mock.calls[0][0]).not.toHaveProperty("imagePath");
     expect(JSON.stringify(action.mock.calls[0][0])).not.toContain("space/author/entry.webp");
+  });
+
+  it("sends a selected Blob through the server-owned create upload orchestration", async () => {
+    const action = vi.fn();
+    const compressed = new Blob([new Uint8Array(400)], { type: "image/webp" });
+    mockCompressImage.mockResolvedValue(compressed);
+    mockUploadImage.mockResolvedValue({ ok: true, message: "今天日记已发布。", entryId: "entry-1" });
+
+    render(<TodayDiaryEditor today="2026-07-19" action={action} />);
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "普通的一天" } });
+    fireEvent.change(screen.getByLabelText("正文"), { target: { value: "今天一起散步。" } });
+    fireEvent.change(screen.getByLabelText("添加一张图片"), {
+      target: { files: [new File([new Uint8Array(1_024)], "photo.jpg", { type: "image/jpeg" })] },
+    });
+    await screen.findByAltText("所选日记图片预览");
+    fireEvent.click(screen.getByRole("button", { name: "发布今日日记" }));
+
+    await waitFor(() => expect(mockUploadImage).toHaveBeenCalled());
+    expect(mockUploadImage.mock.calls[0][0]).toEqual({
+      kind: "create-today",
+      title: "普通的一天",
+      content: "今天一起散步。",
+      entryDate: "2026-07-19",
+    });
+    const submittedImage = (mockUploadImage.mock.calls[0][1] as FormData).get("image");
+    expect(submittedImage).toBeInstanceOf(Blob);
+    expect((submittedImage as Blob).type).toBe("image/webp");
+    expect((submittedImage as Blob).size).toBe(compressed.size);
+    expect(action).not.toHaveBeenCalled();
+    expect(JSON.stringify(mockUploadImage.mock.calls[0][0])).not.toContain("imagePath");
+  });
+
+  it("identifies an image edit using only the public entry ID", async () => {
+    const action = vi.fn();
+    const compressed = new Blob([new Uint8Array(400)], { type: "image/webp" });
+    mockCompressImage.mockResolvedValue(compressed);
+    mockUploadImage.mockResolvedValue({ ok: true, message: "日记已更新。", entryId: "33333333-3333-4333-8333-333333333333" });
+
+    render(
+      <TodayDiaryEditor
+        today="2026-07-19"
+        entryId="33333333-3333-4333-8333-333333333333"
+        action={action}
+        initialValues={{ title: "普通的一天", content: "今天一起散步。" }}
+        submitLabel="保存修改"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText("添加一张图片"), {
+      target: { files: [new File([new Uint8Array(1_024)], "photo.jpg", { type: "image/jpeg" })] },
+    });
+    await screen.findByAltText("所选日记图片预览");
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(mockUploadImage).toHaveBeenCalled());
+    expect(mockUploadImage.mock.calls[0][0]).toEqual(expect.objectContaining({
+      kind: "update-today",
+      entryId: "33333333-3333-4333-8333-333333333333",
+    }));
+    expect(mockUploadImage.mock.calls[0][0]).not.toHaveProperty("imagePath");
+    expect(action).not.toHaveBeenCalled();
   });
 
   it("replaces an edit form with locked copy when the deadline passes", () => {

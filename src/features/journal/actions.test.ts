@@ -49,7 +49,6 @@ describe("journal server actions", () => {
       content: "  Open this together  ",
       recipientId: "33333333-3333-4333-8333-333333333333",
       openAt: "2026-08-01T20:00:00+08:00",
-      imagePath: null,
     };
 
     await expect(sealFutureDiaryAction(input)).resolves.toEqual({
@@ -78,7 +77,6 @@ describe("journal server actions", () => {
       content: "body",
       recipientId: "not-a-uuid",
       openAt: "2026-08-01T12:00:00Z",
-      imagePath: null,
     });
 
     expect(result.ok).toBe(false);
@@ -101,7 +99,6 @@ describe("journal server actions", () => {
         content: "Open this together",
         recipientId: "33333333-3333-4333-8333-333333333333",
         openAt: "2026-08-01T20:00:00+08:00",
-        imagePath: null,
       }),
     ).resolves.toEqual({ ok: false, message: "今天已经写过一篇未来日记了。" });
   });
@@ -121,7 +118,6 @@ describe("journal server actions", () => {
         title: "Today",
         content: "A good day",
         entryDate: "2026-07-19",
-        imagePath: null,
       }),
     ).resolves.toEqual({ ok: false, message: "今天已经写过一篇日记了。" });
   });
@@ -142,7 +138,6 @@ describe("journal server actions", () => {
         content: "Open this together",
         recipientId: "33333333-3333-4333-8333-333333333333",
         openAt: "2026-08-01T20:00:00+08:00",
-        imagePath: null,
       }),
     ).resolves.toEqual({ ok: false, message: "操作失败，请稍后再试。" });
   });
@@ -154,12 +149,10 @@ describe("journal server actions", () => {
       title: "Today",
       content: "A good day",
       entryDate: "2026-07-19",
-      imagePath: null,
     });
     await updateTodayDiaryAction("44444444-4444-4444-8444-444444444444", {
       title: "Updated",
       content: "Updated body",
-      imagePath: null,
     });
     await openFutureDiaryAction("55555555-5555-4555-8555-555555555555");
     await deleteTodayDiaryAction("44444444-4444-4444-8444-444444444444");
@@ -174,6 +167,33 @@ describe("journal server actions", () => {
     expect(mockRevalidatePath).toHaveBeenCalledWith("/");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/journal");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/journal/future");
+  });
+
+  it("rejects raw permanent image paths supplied to public diary actions", async () => {
+    const { rpc } = installClient();
+    const imagePath = "22222222-2222-4222-8222-222222222222/11111111-1111-4111-8111-111111111111/33333333-3333-4333-8333-333333333333.webp";
+
+    await expect(createTodayDiaryAction({
+      title: "Today",
+      content: "A good day",
+      entryDate: "2026-07-19",
+      imagePath,
+    })).resolves.toEqual({ ok: false, message: "日记内容或日期无效。" });
+    await expect(sealFutureDiaryAction({
+      title: "For later",
+      content: "Open this together",
+      recipientId: "33333333-3333-4333-8333-333333333333",
+      openAt: "2026-08-01T20:00:00+08:00",
+      imagePath,
+    })).resolves.toEqual({ ok: false, message: "未来日记内容无效。" });
+    await expect(updateTodayDiaryAction("44444444-4444-4444-8444-444444444444", {
+      title: "Updated",
+      content: "Updated body",
+      imagePath,
+    })).resolves.toEqual({ ok: false, message: "日记内容无效。" });
+
+    expect(mockRequireUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("preserves an existing image path server-side when a text-only update omits it", async () => {

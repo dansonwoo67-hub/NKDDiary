@@ -9,23 +9,20 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 const contentFields = {
   title: z.string().trim().min(1).max(80),
   content: z.string().trim().min(1).max(20_000),
-  imagePath: z.string().min(1).nullable(),
 };
 
 const futureDiarySchema = z.object({
   ...contentFields,
   recipientId: z.string().uuid(),
   openAt: z.string().datetime({ offset: true }),
-});
+}).strict();
 const todayDiarySchema = z.object({
   ...contentFields,
-  imagePath: contentFields.imagePath.optional().default(null),
   entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-});
+}).strict();
 const updateTodayDiarySchema = z.object({
   ...contentFields,
-  imagePath: contentFields.imagePath.optional(),
-});
+}).strict();
 const entryIdSchema = z.string().uuid();
 
 type ActionSuccess = { ok: true; message: string; entryId?: string };
@@ -83,7 +80,7 @@ export async function createTodayDiaryAction(input: unknown): Promise<JournalAct
     p_title: parsed.data.title,
     p_content: parsed.data.content,
     p_entry_date: parsed.data.entryDate,
-    p_image_path: parsed.data.imagePath,
+    p_image_path: null,
   });
 
   if (error) {
@@ -109,7 +106,7 @@ export async function sealFutureDiaryAction(input: unknown): Promise<JournalActi
     p_content: parsed.data.content,
     p_recipient_id: parsed.data.recipientId,
     p_open_at: parsed.data.openAt,
-    p_image_path: parsed.data.imagePath,
+    p_image_path: null,
   });
 
   if (error) {
@@ -135,15 +132,14 @@ export async function updateTodayDiaryAction(
 
   await requireUser();
   const client = await createServerSupabaseClient();
-  const existingEntry = parsed.data.imagePath === undefined ? await getJournalEntry(client, parsedId.data) : null;
-  const imagePath = parsed.data.imagePath === undefined ? existingEntry?.imagePath : parsed.data.imagePath;
-  if (imagePath === undefined) return { ok: false, message: "操作失败，请稍后再试。" };
+  const existingEntry = await getJournalEntry(client, parsedId.data);
+  if (!existingEntry) return { ok: false, message: "操作失败，请稍后再试。" };
 
   const { error } = await client.rpc("update_today_diary", {
     p_entry_id: parsedId.data,
     p_title: parsed.data.title,
     p_content: parsed.data.content,
-    p_image_path: imagePath,
+    p_image_path: existingEntry.imagePath,
   });
 
   if (error) return failureFor(error);

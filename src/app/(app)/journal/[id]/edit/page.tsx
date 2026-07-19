@@ -24,6 +24,7 @@ export default async function EditTodayDiaryPage({ params }: EditTodayDiaryPageP
   return (
     <TodayDiaryEditor
       today={entry.entryDate ?? ""}
+      entryId={entry.id}
       action={updateTodayDiaryAction.bind(null, entry.id)}
       initialValues={{ title: entry.title, content: entry.content }}
       submitLabel="保存修改"
