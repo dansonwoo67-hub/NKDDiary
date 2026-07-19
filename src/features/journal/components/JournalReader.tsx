@@ -1,15 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition, type ReactNode } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import type { JournalActionResult } from "@/features/journal/actions";
-import type { JournalEntry } from "@/features/journal/repository";
+import type { JournalReaderEntry } from "@/features/journal/reader-data";
 
 type JournalReaderProps = {
-  entry: Pick<
-    JournalEntry,
-    "id" | "authorId" | "entryType" | "title" | "content" | "imagePath" | "entryDate" | "publishedAt" | "updatedAt" | "lockedAt"
-  >;
+  entry: JournalReaderEntry;
   authorName: string;
   canManageTodayDiary: boolean;
   todayDiaryState: "editable" | "author-only" | "locked" | "sealed";
@@ -17,6 +15,13 @@ type JournalReaderProps = {
   deleteAction?: (entryId: string) => Promise<JournalActionResult>;
   image?: ReactNode;
 };
+
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+function isBeforeLockDeadline(lockedAt: string) {
+  const deadline = Date.parse(lockedAt);
+  return Number.isFinite(deadline) && deadline > Date.now();
+}
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -35,15 +40,46 @@ export function JournalReader({
   deleteAction,
   image,
 }: JournalReaderProps) {
+  const router = useRouter();
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
-  const canManage = entry.entryType === "today" && canManageTodayDiary;
+  const [isBeforeDeadline, setIsBeforeDeadline] = useState(() => isBeforeLockDeadline(entry.lockedAt));
+  const canManage = entry.entryType === "today" && canManageTodayDiary && isBeforeDeadline;
+  const visibleDiaryState = canManage
+    ? todayDiaryState
+    : todayDiaryState === "editable" && entry.entryType === "today"
+      ? "locked"
+      : todayDiaryState;
+
+  useEffect(() => {
+    if (entry.entryType !== "today" || !canManageTodayDiary) {
+      return;
+    }
+
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const updateDeadlineState = () => {
+      const deadline = Date.parse(entry.lockedAt);
+      const remaining = deadline - Date.now();
+      const active = Number.isFinite(deadline) && remaining > 0;
+      setIsBeforeDeadline(active);
+      if (active) timeout = setTimeout(updateDeadlineState, Math.min(remaining, MAX_TIMEOUT_MS));
+    };
+
+    updateDeadlineState();
+    return () => {
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [canManageTodayDiary, entry.entryType, entry.lockedAt]);
 
   function handleDelete() {
     if (!deleteAction || !canManage) return;
     startTransition(async () => {
       const result = await deleteAction(entry.id);
       setMessage(result.message);
+      if (result.ok) {
+        router.replace("/journal");
+        router.refresh();
+      }
     });
   }
 
@@ -55,7 +91,7 @@ export function JournalReader({
           {entry.entryDate ? <time className="mt-1 block text-sm text-[var(--muted-ink)]">{entry.entryDate}</time> : null}
         </div>
         <p className="rounded-full bg-white/70 px-3 py-1 text-sm text-[var(--muted-ink)]">
-          {{ editable: "可编辑", "author-only": "仅作者可编辑", locked: "已锁定", sealed: "已封存" }[todayDiaryState]}
+          {{ editable: "可编辑", "author-only": "仅作者可编辑", locked: "已锁定", sealed: "已封存" }[visibleDiaryState]}
         </p>
       </div>
 

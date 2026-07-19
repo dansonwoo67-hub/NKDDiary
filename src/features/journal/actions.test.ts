@@ -3,10 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth/require-user", () => ({ requireUser: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createServerSupabaseClient: vi.fn() }));
+vi.mock("./repository", () => ({ getJournalEntry: vi.fn() }));
 
 import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getJournalEntry } from "./repository";
 import {
   createTodayDiaryAction,
   deleteTodayDiaryAction,
@@ -18,6 +20,7 @@ import {
 const mockRequireUser = vi.mocked(requireUser);
 const mockCreateClient = vi.mocked(createServerSupabaseClient);
 const mockRevalidatePath = vi.mocked(revalidatePath);
+const mockGetJournalEntry = vi.mocked(getJournalEntry);
 
 function installClient(result: { data: unknown; error: unknown } = { data: { id: "entry-1" }, error: null }) {
   const rpc = vi.fn().mockResolvedValue(result);
@@ -36,6 +39,7 @@ describe("journal server actions", () => {
       spaceId: "22222222-2222-4222-8222-222222222222",
       profile: {} as never,
     });
+    mockGetJournalEntry.mockResolvedValue({ imagePath: null } as never);
   });
 
   it("seals a validated future diary through the narrow database function", async () => {
@@ -170,5 +174,23 @@ describe("journal server actions", () => {
     expect(mockRevalidatePath).toHaveBeenCalledWith("/");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/journal");
     expect(mockRevalidatePath).toHaveBeenCalledWith("/journal/future");
+  });
+
+  it("preserves an existing image path server-side when a text-only update omits it", async () => {
+    const { rpc } = installClient();
+    mockGetJournalEntry.mockResolvedValue({ imagePath: "space-1/author-1/private-photo.webp" } as never);
+
+    await updateTodayDiaryAction("44444444-4444-4444-8444-444444444444", {
+      title: "Updated",
+      content: "Updated body",
+    });
+
+    expect(mockGetJournalEntry).toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith("update_today_diary", {
+      p_entry_id: "44444444-4444-4444-8444-444444444444",
+      p_title: "Updated",
+      p_content: "Updated body",
+      p_image_path: "space-1/author-1/private-photo.webp",
+    });
   });
 });

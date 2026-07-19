@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { deleteTodayDiaryAction } from "@/features/journal/actions";
 import { JournalReader } from "@/features/journal/components/JournalReader";
 import { canManageTodayDiary, isTodayDiaryLocked } from "@/features/journal/domain";
+import { toJournalReaderEntry } from "@/features/journal/reader-data";
 import { getJournalEntry } from "@/features/journal/repository";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -28,7 +29,7 @@ export default async function JournalEntryPage({ params }: JournalEntryPageProps
 
   return (
     <JournalReader
-      entry={entry}
+      entry={toJournalReaderEntry(entry)}
       authorName={entry.authorId === currentUser.userId ? currentUser.profile.display_name : "对方"}
       canManageTodayDiary={canManage}
       todayDiaryState={todayDiaryState}

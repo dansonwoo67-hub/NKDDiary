@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { getJournalEntry } from "@/features/journal/repository";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -18,9 +19,13 @@ const futureDiarySchema = z.object({
 });
 const todayDiarySchema = z.object({
   ...contentFields,
+  imagePath: contentFields.imagePath.optional().default(null),
   entryDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
-const updateTodayDiarySchema = z.object(contentFields);
+const updateTodayDiarySchema = z.object({
+  ...contentFields,
+  imagePath: contentFields.imagePath.optional(),
+});
 const entryIdSchema = z.string().uuid();
 
 type ActionSuccess = { ok: true; message: string; entryId?: string };
@@ -130,11 +135,15 @@ export async function updateTodayDiaryAction(
 
   await requireUser();
   const client = await createServerSupabaseClient();
+  const existingEntry = parsed.data.imagePath === undefined ? await getJournalEntry(client, parsedId.data) : null;
+  const imagePath = parsed.data.imagePath === undefined ? existingEntry?.imagePath : parsed.data.imagePath;
+  if (imagePath === undefined) return { ok: false, message: "操作失败，请稍后再试。" };
+
   const { error } = await client.rpc("update_today_diary", {
     p_entry_id: parsedId.data,
     p_title: parsed.data.title,
     p_content: parsed.data.content,
-    p_image_path: parsed.data.imagePath,
+    p_image_path: imagePath,
   });
 
   if (error) return failureFor(error);

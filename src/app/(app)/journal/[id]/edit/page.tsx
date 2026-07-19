@@ -25,7 +25,7 @@ export default async function EditTodayDiaryPage({ params }: EditTodayDiaryPageP
     <TodayDiaryEditor
       today={entry.entryDate ?? ""}
       action={updateTodayDiaryAction.bind(null, entry.id)}
-      initialValues={{ title: entry.title, content: entry.content, imagePath: entry.imagePath }}
+      initialValues={{ title: entry.title, content: entry.content }}
       submitLabel="保存修改"
     />
   );

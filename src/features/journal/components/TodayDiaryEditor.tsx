@@ -1,26 +1,19 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useState, useTransition } from "react";
 import type { JournalActionResult } from "@/features/journal/actions";
 
 export type TodayDiarySubmission = {
   title: string;
   content: string;
   entryDate: string;
-  imagePath: string | null;
-};
-
-export type TodayDiaryImageControlProps = {
-  imagePath: string | null;
-  onImagePathChange: (imagePath: string | null) => void;
 };
 
 type TodayDiaryEditorProps = {
   today: string;
   action: (input: TodayDiarySubmission) => Promise<JournalActionResult>;
-  initialValues?: Partial<Pick<TodayDiarySubmission, "title" | "content" | "imagePath">>;
+  initialValues?: Partial<Pick<TodayDiarySubmission, "title" | "content">>;
   submitLabel?: string;
-  renderImageControl?: (props: TodayDiaryImageControlProps) => ReactNode;
 };
 
 function countCharacters(value: string) {
@@ -32,11 +25,9 @@ export function TodayDiaryEditor({
   action,
   initialValues,
   submitLabel = "发布今日日记",
-  renderImageControl,
 }: TodayDiaryEditorProps) {
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [content, setContent] = useState(initialValues?.content ?? "");
-  const [imagePath, setImagePath] = useState<string | null>(initialValues?.imagePath ?? null);
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -62,7 +53,6 @@ export function TodayDiaryEditor({
         title: title.trim(),
         content: content.trim(),
         entryDate: today,
-        imagePath,
       });
       setIsError(!result.ok);
       setMessage(result.message);
@@ -110,10 +100,6 @@ export function TodayDiaryEditor({
         <p id="today-diary-content-count" className="mt-2 text-right text-xs text-[var(--muted-ink)]">
           {countCharacters(content)}/20000
         </p>
-
-        {renderImageControl ? (
-          <div className="mt-6">{renderImageControl({ imagePath, onImagePathChange: setImagePath })}</div>
-        ) : null}
 
         {message ? (
           <p className="mt-5 rounded-2xl bg-white/60 px-4 py-3 text-sm text-[var(--muted-ink)]" role={isError ? "alert" : "status"}>

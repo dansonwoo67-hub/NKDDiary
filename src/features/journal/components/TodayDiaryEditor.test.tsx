@@ -21,7 +21,6 @@ describe("TodayDiaryEditor", () => {
           entryDate: "2026-07-19",
           title: "普通的一天",
           content: "今天一起散步。",
-          imagePath: null,
         }),
       ),
     );
@@ -49,28 +48,15 @@ describe("TodayDiaryEditor", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("今天已经写过一篇日记了。");
   });
 
-  it("lets a future image control supply the submitted image path", async () => {
+  it("submits text-only form data without an image path", async () => {
     const action = vi.fn().mockResolvedValue({ ok: true, message: "今日日记已发布。" });
 
-    render(
-      <TodayDiaryEditor
-        today="2026-07-19"
-        action={action}
-        renderImageControl={({ onImagePathChange }) => (
-          <button type="button" onClick={() => onImagePathChange("space/author/entry.webp")}>
-            选择图片
-          </button>
-        )}
-      />,
-    );
+    render(<TodayDiaryEditor today="2026-07-19" action={action} initialValues={{ title: "普通的一天", content: "今天一起散步。" }} />);
 
-    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "普通的一天" } });
-    fireEvent.change(screen.getByLabelText("正文"), { target: { value: "今天一起散步。" } });
-    fireEvent.click(screen.getByRole("button", { name: "选择图片" }));
     fireEvent.click(screen.getByRole("button", { name: "发布今日日记" }));
 
-    await waitFor(() =>
-      expect(action).toHaveBeenCalledWith(expect.objectContaining({ imagePath: "space/author/entry.webp" })),
-    );
+    await waitFor(() => expect(action).toHaveBeenCalled());
+    expect(action.mock.calls[0][0]).not.toHaveProperty("imagePath");
+    expect(JSON.stringify(action.mock.calls[0][0])).not.toContain("space/author/entry.webp");
   });
 });
