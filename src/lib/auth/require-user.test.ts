@@ -64,6 +64,15 @@ describe("requireUser", () => {
     await expect(requireUser()).rejects.toThrow("无权访问这个私人空间");
   });
 
+  it("rejects a legacy-marked user with multiple active database memberships", async () => {
+    mockAuthenticatedClient({ nkd_diary_member: "true" }, [
+      { user_id: "user-1", space_id: "space-1", active: true },
+      { user_id: "user-1", space_id: "space-2", active: true },
+    ]);
+
+    await expect(requireUser()).rejects.toThrow("无权访问这个私人空间");
+  });
+
   it.each([
     ["missing", undefined],
     ["false", { nkd_diary_member: "false" }],
@@ -99,5 +108,14 @@ describe("resolveMembership", () => {
       userId: "user-1",
       spaceId: "space-1",
     });
+  });
+
+  it("rejects multiple active memberships instead of choosing the first", () => {
+    expect(() =>
+      resolveMembership("user-1", [
+        { user_id: "user-1", space_id: "space-1", active: true },
+        { user_id: "user-1", space_id: "space-2", active: true },
+      ]),
+    ).toThrow("无权访问这个私人空间");
   });
 });

@@ -11,6 +11,16 @@ function readMigration() {
   return readFileSync(migrationPath, "utf8").toLowerCase();
 }
 
+function readFunction(name: string) {
+  const migration = readMigration();
+  const start = migration.indexOf(`create or replace function public.${name}`);
+  const end = migration.indexOf("\n$$;", start);
+
+  expect(start, `${name} must exist`).toBeGreaterThanOrEqual(0);
+  expect(end, `${name} must have a complete body`).toBeGreaterThan(start);
+  return migration.slice(start, end);
+}
+
 describe("journal lifecycle migration contract", () => {
   it("exposes only narrow lifecycle and safe-card functions to authenticated users", () => {
     const migration = readMigration();
@@ -39,6 +49,34 @@ describe("journal lifecycle migration contract", () => {
     expect(migration).toContain("opened_at = coalesce(opened_at, now())");
     expect(migration).toContain("opened_by = coalesce(opened_by, auth.uid())");
   });
+
+  it.each(["open_future_diary", "update_today_diary", "delete_today_diary"])(
+    "%s rejects callers who are no longer active members after locking the row",
+    (name) => {
+      const definition = readFunction(name);
+      const lockAt = definition.indexOf("for update");
+      const membershipAt = definition.indexOf(
+        "public.is_active_space_member(v_space_id, auth.uid())",
+      );
+
+      expect(definition).toContain("journal.space_id");
+      expect(lockAt).toBeGreaterThanOrEqual(0);
+      expect(membershipAt).toBeGreaterThan(lockAt);
+    },
+  );
+
+  it.each(["update_today_diary", "delete_today_diary"])(
+    "%s checks the wall-clock deadline only after acquiring the row lock",
+    (name) => {
+      const definition = readFunction(name);
+      const lockAt = definition.indexOf("for update");
+      const wallClockAt = definition.indexOf("clock_timestamp()");
+
+      expect(lockAt).toBeGreaterThanOrEqual(0);
+      expect(wallClockAt).toBeGreaterThan(lockAt);
+      expect(definition).not.toContain("v_now timestamptz := now()");
+    },
+  );
 
   it("preserves full-content RLS until an explicit recipient open", () => {
     const migration = readMigration();

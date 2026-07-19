@@ -35,12 +35,13 @@ export function assertLegacyCoupleMembership(appMetadata: unknown): void {
 }
 
 export function resolveMembership(userId: string, rows: MembershipRow[]) {
-  const membership = rows.find((row) => row.user_id === userId && row.active);
+  const memberships = rows.filter((row) => row.user_id === userId && row.active);
 
-  if (!membership) {
+  if (memberships.length !== 1) {
     throw new Error(PRIVATE_SPACE_ACCESS_ERROR);
   }
 
+  const [membership] = memberships;
   return { userId, spaceId: membership.space_id };
 }
 

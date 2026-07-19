@@ -83,7 +83,13 @@ describe("journal server actions", () => {
   });
 
   it("maps the future quota unique violation without leaking database details", async () => {
-    installClient({ data: null, error: { code: "23505", message: "index details" } });
+    installClient({
+      data: null,
+      error: {
+        code: "23505",
+        message: "duplicate key value violates unique constraint one_future_diary_per_author_creation_date",
+      },
+    });
 
     await expect(
       sealFutureDiaryAction({
@@ -94,6 +100,47 @@ describe("journal server actions", () => {
         imagePath: null,
       }),
     ).resolves.toEqual({ ok: false, message: "今天已经写过一篇未来日记了。" });
+  });
+
+  it("maps the today quota only when the known partial index is identified", async () => {
+    installClient({
+      data: null,
+      error: {
+        code: "23505",
+        constraint: "one_today_diary_per_author_date",
+        message: "duplicate key",
+      },
+    });
+
+    await expect(
+      createTodayDiaryAction({
+        title: "Today",
+        content: "A good day",
+        entryDate: "2026-07-19",
+        imagePath: null,
+      }),
+    ).resolves.toEqual({ ok: false, message: "今天已经写过一篇日记了。" });
+  });
+
+  it("does not label an unrelated unique violation as a diary quota", async () => {
+    installClient({
+      data: null,
+      error: {
+        code: "23505",
+        details: "constraint profiles_login_name_key",
+        message: "duplicate key",
+      },
+    });
+
+    await expect(
+      sealFutureDiaryAction({
+        title: "For later",
+        content: "Open this together",
+        recipientId: "33333333-3333-4333-8333-333333333333",
+        openAt: "2026-08-01T20:00:00+08:00",
+        imagePath: null,
+      }),
+    ).resolves.toEqual({ ok: false, message: "操作失败，请稍后再试。" });
   });
 
   it("creates, updates, opens, and deletes only through lifecycle RPCs", async () => {

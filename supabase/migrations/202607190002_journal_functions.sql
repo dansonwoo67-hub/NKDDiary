@@ -92,11 +92,12 @@ set search_path = ''
 as $$
 declare
   v_now timestamptz := now();
+  v_space_id uuid;
   v_recipient_id uuid;
   v_open_at timestamptz;
 begin
-  select journal.recipient_id, journal.open_at
-  into v_recipient_id, v_open_at
+  select journal.space_id, journal.recipient_id, journal.open_at
+  into v_space_id, v_recipient_id, v_open_at
   from public.journal_entries as journal
   where id = p_entry_id
     and entry_type = 'future'
@@ -105,7 +106,9 @@ begin
   if not found then
     raise exception 'journal entry not found' using errcode = 'P0002';
   end if;
-  if v_recipient_id <> auth.uid() then
+  if v_recipient_id <> auth.uid()
+    or not public.is_active_space_member(v_space_id, auth.uid())
+  then
     raise exception 'journal entry not found' using errcode = 'P0002';
   end if;
   if v_now < v_open_at then
@@ -135,22 +138,25 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_now timestamptz := now();
+  v_space_id uuid;
   v_author_id uuid;
   v_locked_at timestamptz;
   v_entry public.journal_entries;
 begin
-  select journal.author_id, journal.locked_at
-  into v_author_id, v_locked_at
+  select journal.space_id, journal.author_id, journal.locked_at
+  into v_space_id, v_author_id, v_locked_at
   from public.journal_entries as journal
   where id = p_entry_id
     and entry_type = 'today'
   for update;
 
-  if not found or v_author_id <> auth.uid() then
+  if not found
+    or v_author_id <> auth.uid()
+    or not public.is_active_space_member(v_space_id, auth.uid())
+  then
     raise exception 'journal entry not found' using errcode = 'P0002';
   end if;
-  if v_now > v_locked_at then
+  if clock_timestamp() > v_locked_at then
     raise exception 'journal entry is locked' using errcode = '55000';
   end if;
 
@@ -170,21 +176,24 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_now timestamptz := now();
+  v_space_id uuid;
   v_author_id uuid;
   v_locked_at timestamptz;
 begin
-  select journal.author_id, journal.locked_at
-  into v_author_id, v_locked_at
+  select journal.space_id, journal.author_id, journal.locked_at
+  into v_space_id, v_author_id, v_locked_at
   from public.journal_entries as journal
   where id = p_entry_id
     and entry_type = 'today'
   for update;
 
-  if not found or v_author_id <> auth.uid() then
+  if not found
+    or v_author_id <> auth.uid()
+    or not public.is_active_space_member(v_space_id, auth.uid())
+  then
     raise exception 'journal entry not found' using errcode = 'P0002';
   end if;
-  if v_now > v_locked_at then
+  if clock_timestamp() > v_locked_at then
     raise exception 'journal entry is locked' using errcode = '55000';
   end if;
 

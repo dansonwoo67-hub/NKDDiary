@@ -27,11 +27,29 @@ type ActionSuccess = { ok: true; message: string; entryId?: string };
 type ActionFailure = { ok: false; message: string };
 export type JournalActionResult = ActionSuccess | ActionFailure;
 
-type DatabaseError = { code?: string; message?: string } | null;
+type DatabaseError = {
+  code?: string;
+  message?: string;
+  details?: string;
+  hint?: string;
+  constraint?: string;
+  constraint_name?: string;
+} | null;
 
-function failureFor(error: DatabaseError, quotaMessage?: string): ActionFailure {
-  if (error?.code === "23505" && quotaMessage) {
-    return { ok: false, message: quotaMessage };
+function failureFor(
+  error: DatabaseError,
+  quota?: { index: string; message: string },
+): ActionFailure {
+  const identifiesQuota = [
+    error?.message,
+    error?.details,
+    error?.hint,
+    error?.constraint,
+    error?.constraint_name,
+  ].some((value) => value?.includes(quota?.index ?? "") && Boolean(quota?.index));
+
+  if (error?.code === "23505" && quota && identifiesQuota) {
+    return { ok: false, message: quota.message };
   }
   return { ok: false, message: "操作失败，请稍后再试。" };
 }
@@ -63,7 +81,12 @@ export async function createTodayDiaryAction(input: unknown): Promise<JournalAct
     p_image_path: parsed.data.imagePath,
   });
 
-  if (error) return failureFor(error, "今天已经写过一篇日记了。");
+  if (error) {
+    return failureFor(error, {
+      index: "one_today_diary_per_author_date",
+      message: "今天已经写过一篇日记了。",
+    });
+  }
   const entryId = resultId(data);
   revalidateJournal(entryId);
   return { ok: true, message: "今天日记已发布。", entryId };
@@ -84,7 +107,12 @@ export async function sealFutureDiaryAction(input: unknown): Promise<JournalActi
     p_image_path: parsed.data.imagePath,
   });
 
-  if (error) return failureFor(error, "今天已经写过一篇未来日记了。");
+  if (error) {
+    return failureFor(error, {
+      index: "one_future_diary_per_author_creation_date",
+      message: "今天已经写过一篇未来日记了。",
+    });
+  }
   const entryId = resultId(data);
   revalidateJournal(entryId, true);
   return { ok: true, message: "未来日记已封存。", entryId };
