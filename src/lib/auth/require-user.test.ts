@@ -23,11 +23,15 @@ const profile = {
 const mockCreateServerSupabaseClient = vi.mocked(createServerSupabaseClient);
 const mockRedirect = vi.mocked(redirect);
 
-function mockAuthenticatedClient(appMetadata: unknown) {
-  const single = vi.fn().mockResolvedValue({ data: profile, error: null });
-  const eq = vi.fn().mockReturnValue({ single });
-  const select = vi.fn().mockReturnValue({ eq });
-  const from = vi.fn().mockReturnValue({ select });
+function mockAuthenticatedClient(appMetadata: unknown, memberships: Array<{ user_id: string; space_id: string; active: boolean }> = [
+  { user_id: "user-1", space_id: "space-1", active: true },
+]) {
+  const profileSingle = vi.fn().mockResolvedValue({ data: profile, error: null });
+  const profileEq = vi.fn().mockReturnValue({ single: profileSingle });
+  const membershipEq = vi.fn().mockResolvedValue({ data: memberships, error: null });
+  const from = vi.fn((table: string) => ({
+    select: vi.fn().mockReturnValue({ eq: table === "profiles" ? profileEq : membershipEq }),
+  }));
 
   mockCreateServerSupabaseClient.mockResolvedValue({
     auth: {
@@ -47,11 +51,17 @@ describe("requireUser", () => {
     vi.clearAllMocks();
   });
 
-  it("returns the transitional space only after an explicit legacy membership marker", async () => {
+  it("returns the active database membership while retaining the explicit legacy gate", async () => {
     mockAuthenticatedClient({ nkd_diary_member: "true" });
 
-    await expect(requireUser()).resolves.toEqual({ userId: "user-1", profile, spaceId: "legacy-couple-space" });
+    await expect(requireUser()).resolves.toEqual({ userId: "user-1", profile, spaceId: "space-1" });
     expect(mockRedirect).not.toHaveBeenCalled();
+  });
+
+  it("rejects a legacy-marked user without an active database membership", async () => {
+    mockAuthenticatedClient({ nkd_diary_member: "true" }, []);
+
+    await expect(requireUser()).rejects.toThrow("无权访问这个私人空间");
   });
 
   it.each([

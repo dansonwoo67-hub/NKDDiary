@@ -44,13 +44,6 @@ export function resolveMembership(userId: string, rows: MembershipRow[]) {
   return { userId, spaceId: membership.space_id };
 }
 
-/**
- * The deployed schema still authorizes the couple through profile RLS and the
- * `nkd_diary_member` JWT claim. Task 2 will replace this transitional ID with
- * a real active membership query and pass its rows through `resolveMembership`.
- */
-const LEGACY_COUPLE_SPACE_ID = process.env.COUPLE_LEGACY_SPACE_ID ?? "legacy-couple-space";
-
 export async function requireUser(): Promise<{ userId: string; profile: Profile; spaceId: string }> {
   const supabase = await createServerSupabaseClient();
   const { data: claimsData, error: claimsError } = await supabase.auth.getClaims();
@@ -62,6 +55,17 @@ export async function requireUser(): Promise<{ userId: string; profile: Profile;
 
   assertLegacyCoupleMembership(claimsData?.claims?.app_metadata);
 
+  const { data: memberships, error: membershipError } = await supabase
+    .from("space_members")
+    .select("user_id, space_id, active")
+    .eq("user_id", userId);
+
+  if (membershipError) {
+    throw new Error(PRIVATE_SPACE_ACCESS_ERROR);
+  }
+
+  const membership = resolveMembership(userId, (memberships ?? []) as MembershipRow[]);
+
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("*")
@@ -72,5 +76,5 @@ export async function requireUser(): Promise<{ userId: string; profile: Profile;
     redirect("/login");
   }
 
-  return { userId, profile: profile as Profile, spaceId: LEGACY_COUPLE_SPACE_ID };
+  return { userId, profile: profile as Profile, spaceId: membership.spaceId };
 }
