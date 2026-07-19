@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { getJournalEntry } from "@/features/journal/repository";
+import { cleanupJournalImage } from "@/features/media/storage-cleanup";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -166,9 +167,25 @@ export async function deleteTodayDiaryAction(entryId: string): Promise<JournalAc
 
   await requireUser();
   const client = await createServerSupabaseClient();
+  const existingEntry = await getJournalEntry(client, parsed.data);
+  if (!existingEntry) return { ok: false, message: "操作失败，请稍后再试。" };
   const { error } = await client.rpc("delete_today_diary", { p_entry_id: parsed.data });
 
   if (error) return failureFor(error);
   revalidateJournal();
-  return { ok: true, message: "日记已删除。" };
+  if (existingEntry.imagePath) {
+    const cleanup = await cleanupJournalImage(client, {
+      spaceId: existingEntry.spaceId,
+      authorId: existingEntry.authorId,
+      entryId: parsed.data,
+      reason: "diary_deleted",
+    });
+    if (cleanup === "failed") {
+      return { ok: false, message: "日记已删除，但图片清理未完成，请联系管理员。" };
+    }
+    if (cleanup === "queued") {
+      return { ok: true, message: "日记已删除，图片清理已进入重试队列。", entryId: parsed.data };
+    }
+  }
+  return { ok: true, message: "日记已删除。", entryId: parsed.data };
 }

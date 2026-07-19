@@ -24,11 +24,13 @@ const mockGetJournalEntry = vi.mocked(getJournalEntry);
 
 function installClient(result: { data: unknown; error: unknown } = { data: { id: "entry-1" }, error: null }) {
   const rpc = vi.fn().mockResolvedValue(result);
+  const remove = vi.fn().mockResolvedValue({ data: null, error: null });
+  const storageFrom = vi.fn(() => ({ remove }));
   const from = vi.fn(() => {
     throw new Error("journal actions must call database functions, not tables");
   });
-  mockCreateClient.mockResolvedValue({ rpc, from } as never);
-  return { rpc, from };
+  mockCreateClient.mockResolvedValue({ rpc, from, storage: { from: storageFrom } } as never);
+  return { rpc, from, remove, storageFrom };
 }
 
 describe("journal server actions", () => {
@@ -212,5 +214,92 @@ describe("journal server actions", () => {
       p_content: "Updated body",
       p_image_path: "space-1/author-1/private-photo.webp",
     });
+  });
+
+  it("deletes the database row before removing its captured canonical image", async () => {
+    const { rpc, remove } = installClient();
+    const entryId = "44444444-4444-4444-8444-444444444444";
+    const spaceId = "22222222-2222-4222-8222-222222222222";
+    const authorId = "11111111-1111-4111-8111-111111111111";
+    const imagePath = `${spaceId}/${authorId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({ id: entryId, spaceId, authorId, imagePath } as never);
+
+    await expect(deleteTodayDiaryAction(entryId)).resolves.toEqual({
+      ok: true,
+      message: "日记已删除。",
+      entryId,
+    });
+
+    expect(rpc).toHaveBeenCalledWith("delete_today_diary", { p_entry_id: entryId });
+    expect(rpc.mock.invocationCallOrder[0]).toBeLessThan(remove.mock.invocationCallOrder[0]);
+    expect(remove).toHaveBeenCalledWith([imagePath]);
+  });
+
+  it("does not remove image bytes when diary deletion is rejected", async () => {
+    const { remove } = installClient({ data: null, error: { code: "55000" } });
+    const entryId = "44444444-4444-4444-8444-444444444444";
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId: "22222222-2222-4222-8222-222222222222",
+      authorId: "11111111-1111-4111-8111-111111111111",
+      imagePath: "22222222-2222-4222-8222-222222222222/11111111-1111-4111-8111-111111111111/44444444-4444-4444-8444-444444444444.webp",
+    } as never);
+
+    await deleteTodayDiaryAction(entryId);
+
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("queues image reconciliation after a successful diary delete and three cleanup failures", async () => {
+    const { rpc, remove } = installClient();
+    rpc
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+    remove.mockResolvedValue({ data: null, error: { message: "remove failed" } });
+    const entryId = "44444444-4444-4444-8444-444444444444";
+    const spaceId = "22222222-2222-4222-8222-222222222222";
+    const authorId = "11111111-1111-4111-8111-111111111111";
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId,
+      imagePath: `${spaceId}/${authorId}/${entryId}.webp`,
+    } as never);
+
+    await expect(deleteTodayDiaryAction(entryId)).resolves.toEqual({
+      ok: true,
+      message: "日记已删除，图片清理已进入重试队列。",
+      entryId,
+    });
+
+    expect(remove).toHaveBeenCalledTimes(3);
+    expect(rpc).toHaveBeenLastCalledWith("enqueue_journal_image_cleanup", {
+      p_space_id: spaceId,
+      p_entry_id: entryId,
+      p_reason: "diary_deleted",
+    });
+  });
+
+  it("returns an actionable safe failure if deleted-image reconciliation cannot be recorded", async () => {
+    const { rpc, remove } = installClient();
+    rpc
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: "queue failed" } });
+    remove.mockResolvedValue({ data: null, error: { message: "remove failed" } });
+    const entryId = "44444444-4444-4444-8444-444444444444";
+    const spaceId = "22222222-2222-4222-8222-222222222222";
+    const authorId = "11111111-1111-4111-8111-111111111111";
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId,
+      imagePath: `${spaceId}/${authorId}/${entryId}.webp`,
+    } as never);
+
+    await expect(deleteTodayDiaryAction(entryId)).resolves.toEqual({
+      ok: false,
+      message: "日记已删除，但图片清理未完成，请联系管理员。",
+    });
+    expect(remove).toHaveBeenCalledTimes(3);
   });
 });

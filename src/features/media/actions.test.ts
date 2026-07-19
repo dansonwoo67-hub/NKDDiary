@@ -17,9 +17,14 @@ const mockCreateClient = vi.mocked(createServerSupabaseClient);
 const userId = "11111111-1111-4111-8111-111111111111";
 const spaceId = "22222222-2222-4222-8222-222222222222";
 
-function imageForm(size = 400 * 1024, type = "image/webp") {
+function imageForm(size = 400 * 1024, type = "image/webp", validWebpHeader = true) {
+  const bytes = new Uint8Array(size);
+  if (validWebpHeader && size >= 12) {
+    bytes.set([0x52, 0x49, 0x46, 0x46], 0);
+    bytes.set([0x57, 0x45, 0x42, 0x50], 8);
+  }
   const form = new FormData();
-  form.set("image", new File([new Uint8Array(size)], "journal.webp", { type }));
+  form.set("image", new File([bytes], "journal.webp", { type }));
   return form;
 }
 
@@ -94,6 +99,47 @@ describe("journal image server actions", () => {
     expect(client.remove).toHaveBeenCalledWith([uploadedPath]);
   });
 
+  it("queues orphan cleanup after three inspected remove failures", async () => {
+    const client = installClient();
+    client.rpc
+      .mockResolvedValueOnce({ data: null, error: { code: "42501" } })
+      .mockResolvedValueOnce({ data: null, error: null });
+    client.remove.mockResolvedValue({ data: null, error: { message: "remove failed" } });
+
+    await expect(uploadJournalImageAction({
+      kind: "create-today",
+      title: "普通的一天",
+      content: "数据库会拒绝。",
+      entryDate: "2026-07-19",
+    }, imageForm())).resolves.toEqual({ ok: false, message: "操作失败，请稍后再试。" });
+
+    expect(client.remove).toHaveBeenCalledTimes(3);
+    expect(client.rpc.mock.calls[1]).toEqual(["enqueue_journal_image_cleanup", {
+      p_space_id: spaceId,
+      p_entry_id: expect.any(String),
+      p_reason: "database_write_failed",
+    }]);
+  });
+
+  it("returns an actionable safe error when orphan cleanup cannot be queued", async () => {
+    const client = installClient();
+    client.rpc
+      .mockResolvedValueOnce({ data: null, error: { code: "42501" } })
+      .mockResolvedValueOnce({ data: null, error: { message: "queue failed" } });
+    client.remove.mockResolvedValue({ data: null, error: { message: "remove failed" } });
+
+    await expect(uploadJournalImageAction({
+      kind: "create-today",
+      title: "普通的一天",
+      content: "清理也会失败。",
+      entryDate: "2026-07-19",
+    }, imageForm())).resolves.toEqual({
+      ok: false,
+      message: "操作失败，且图片清理未完成，请联系管理员。",
+    });
+    expect(client.remove).toHaveBeenCalledTimes(3);
+  });
+
   it("uploads a replacement to the existing entry path before updating", async () => {
     const client = installClient();
     const entryId = "33333333-3333-4333-8333-333333333333";
@@ -155,6 +201,131 @@ describe("journal image server actions", () => {
     });
   });
 
+  it("leaves existing bytes untouched when replacement RPC validation fails", async () => {
+    const client = installClient({ data: null, error: { code: "55000" } });
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await expect(uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "RPC 会拒绝。",
+    }, imageForm())).resolves.toEqual({ ok: false, message: "操作失败，请稍后再试。" });
+
+    expect(client.rpc).toHaveBeenCalledOnce();
+    expect(client.upload).not.toHaveBeenCalled();
+    expect(client.remove).not.toHaveBeenCalled();
+  });
+
+  it("leaves existing bytes untouched when replacement RPC throws", async () => {
+    const client = installClient();
+    client.rpc.mockRejectedValue(new Error("database unavailable"));
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await expect(uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "RPC 会抛错。",
+    }, imageForm())).resolves.toEqual({ ok: false, message: "操作失败，请稍后再试。" });
+
+    expect(client.upload).not.toHaveBeenCalled();
+    expect(client.remove).not.toHaveBeenCalled();
+  });
+
+  it("keeps existing bytes when replacement upload fails after RPC succeeds", async () => {
+    const client = installClient();
+    client.upload.mockResolvedValue({ data: null, error: { message: "upload failed" } });
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await expect(uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "上传会失败。",
+    }, imageForm())).resolves.toEqual({
+      ok: false,
+      message: "日记文字已保存，但图片替换失败，原图片仍保留。",
+    });
+
+    expect(client.rpc.mock.invocationCallOrder[0]).toBeLessThan(client.upload.mock.invocationCallOrder[0]);
+    expect(client.remove).not.toHaveBeenCalled();
+  });
+
+  it("keeps existing bytes when replacement upload throws after RPC succeeds", async () => {
+    const client = installClient();
+    client.upload.mockRejectedValue(new Error("storage unavailable"));
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await expect(uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "上传会抛错。",
+    }, imageForm())).resolves.toEqual({
+      ok: false,
+      message: "日记文字已保存，但图片替换失败，原图片仍保留。",
+    });
+
+    expect(client.remove).not.toHaveBeenCalled();
+  });
+
+  it("replaces existing bytes exactly once after RPC succeeds", async () => {
+    const client = installClient();
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "替换成功。",
+    }, imageForm());
+
+    expect(client.rpc.mock.invocationCallOrder[0]).toBeLessThan(client.upload.mock.invocationCallOrder[0]);
+    expect(client.upload).toHaveBeenCalledOnce();
+    expect(client.remove).not.toHaveBeenCalled();
+  });
+
   it("rejects an extra raw image path in media orchestration input", async () => {
     installClient();
 
@@ -183,6 +354,21 @@ describe("journal image server actions", () => {
         imageForm(100, "image/png"),
       ),
     ).resolves.toEqual({ ok: false, message: "图片格式或大小无效。" });
+    expect(mockRequireUser).not.toHaveBeenCalled();
+  });
+
+  it("rejects a spoofed image/webp file without RIFF and WEBP magic bytes", async () => {
+    installClient();
+
+    await expect(uploadJournalImageAction({
+      kind: "create-today",
+      title: "普通的一天",
+      content: "今天一起散步。",
+      entryDate: "2026-07-19",
+    }, imageForm(100, "image/webp", false))).resolves.toEqual({
+      ok: false,
+      message: "图片格式或大小无效。",
+    });
     expect(mockRequireUser).not.toHaveBeenCalled();
   });
 
