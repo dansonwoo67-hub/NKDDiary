@@ -1,10 +1,13 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TodayDiaryEditor } from "./TodayDiaryEditor";
 
 describe("TodayDiaryEditor", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
 
   it("submits today’s entry date with the diary content", async () => {
     const action = vi.fn().mockResolvedValue({ ok: true, message: "今日日记已发布。" });
@@ -58,5 +61,49 @@ describe("TodayDiaryEditor", () => {
     await waitFor(() => expect(action).toHaveBeenCalled());
     expect(action.mock.calls[0][0]).not.toHaveProperty("imagePath");
     expect(JSON.stringify(action.mock.calls[0][0])).not.toContain("space/author/entry.webp");
+  });
+
+  it("replaces an edit form with locked copy when the deadline passes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T09:59:50Z"));
+
+    render(
+      <TodayDiaryEditor
+        today="2026-07-19"
+        action={vi.fn()}
+        lockedAt="2026-07-20T10:00:00Z"
+        initialValues={{ title: "普通的一天", content: "今天一起散步。" }}
+        submitLabel="保存修改"
+      />,
+    );
+
+    expect(screen.getByLabelText("标题")).toBeVisible();
+    expect(screen.getByRole("button", { name: "保存修改" })).toBeVisible();
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(screen.getByText("这篇日记已锁定")).toBeVisible();
+    expect(screen.queryByLabelText("标题")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存修改" })).not.toBeInTheDocument();
+  });
+
+  it("renders locked copy immediately for an already-expired edit deadline", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T10:00:00Z"));
+
+    render(<TodayDiaryEditor today="2026-07-19" action={vi.fn()} lockedAt="2026-07-20T10:00:00Z" submitLabel="保存修改" />);
+
+    expect(screen.getByText("这篇日记已锁定")).toBeVisible();
+    expect(screen.queryByLabelText("标题")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存修改" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a create form available without a lock deadline", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-20T10:00:00Z"));
+
+    render(<TodayDiaryEditor today="2026-07-20" action={vi.fn()} />);
+
+    expect(screen.getByLabelText("标题")).toBeVisible();
+    expect(screen.getByRole("button", { name: "发布今日日记" })).toBeVisible();
+    expect(screen.queryByText("这篇日记已锁定")).not.toBeInTheDocument();
   });
 });

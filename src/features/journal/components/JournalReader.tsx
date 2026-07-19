@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition, type ReactNode } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { JournalActionResult } from "@/features/journal/actions";
 import type { JournalReaderEntry } from "@/features/journal/reader-data";
+import { useDeadlineActive } from "@/features/journal/components/useDeadlineActive";
 
 type JournalReaderProps = {
   entry: JournalReaderEntry;
@@ -15,13 +16,6 @@ type JournalReaderProps = {
   deleteAction?: (entryId: string) => Promise<JournalActionResult>;
   image?: ReactNode;
 };
-
-const MAX_TIMEOUT_MS = 2_147_483_647;
-
-function isBeforeLockDeadline(lockedAt: string) {
-  const deadline = Date.parse(lockedAt);
-  return Number.isFinite(deadline) && deadline > Date.now();
-}
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("zh-CN", {
@@ -43,33 +37,16 @@ export function JournalReader({
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
-  const [isBeforeDeadline, setIsBeforeDeadline] = useState(() => isBeforeLockDeadline(entry.lockedAt));
+  const isBeforeDeadline = useDeadlineActive(
+    entry.entryType === "today" ? entry.lockedAt : undefined,
+    entry.entryType === "today" && canManageTodayDiary,
+  );
   const canManage = entry.entryType === "today" && canManageTodayDiary && isBeforeDeadline;
   const visibleDiaryState = canManage
     ? todayDiaryState
     : todayDiaryState === "editable" && entry.entryType === "today"
       ? "locked"
       : todayDiaryState;
-
-  useEffect(() => {
-    if (entry.entryType !== "today" || !canManageTodayDiary) {
-      return;
-    }
-
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    const updateDeadlineState = () => {
-      const deadline = Date.parse(entry.lockedAt);
-      const remaining = deadline - Date.now();
-      const active = Number.isFinite(deadline) && remaining > 0;
-      setIsBeforeDeadline(active);
-      if (active) timeout = setTimeout(updateDeadlineState, Math.min(remaining, MAX_TIMEOUT_MS));
-    };
-
-    updateDeadlineState();
-    return () => {
-      if (timeout) clearTimeout(timeout);
-    };
-  }, [canManageTodayDiary, entry.entryType, entry.lockedAt]);
 
   function handleDelete() {
     if (!deleteAction || !canManage) return;

@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { JournalActionResult } from "@/features/journal/actions";
+import { useDeadlineActive } from "@/features/journal/components/useDeadlineActive";
 
 export type TodayDiarySubmission = {
   title: string;
@@ -14,6 +15,7 @@ type TodayDiaryEditorProps = {
   action: (input: TodayDiarySubmission) => Promise<JournalActionResult>;
   initialValues?: Partial<Pick<TodayDiarySubmission, "title" | "content">>;
   submitLabel?: string;
+  lockedAt?: string;
 };
 
 function countCharacters(value: string) {
@@ -25,12 +27,15 @@ export function TodayDiaryEditor({
   action,
   initialValues,
   submitLabel = "发布今日日记",
+  lockedAt,
 }: TodayDiaryEditorProps) {
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [content, setContent] = useState(initialValues?.content ?? "");
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const isBeforeDeadline = useDeadlineActive(lockedAt, Boolean(lockedAt));
+  const isLocked = Boolean(lockedAt) && !isBeforeDeadline;
 
   function validate() {
     if (!title.trim() || !content.trim()) return "请填写标题和正文。";
@@ -57,6 +62,16 @@ export function TodayDiaryEditor({
       setIsError(!result.ok);
       setMessage(result.message);
     });
+  }
+
+  if (isLocked) {
+    return (
+      <section className="hand-card rounded-[2rem] p-6">
+        <p className="text-sm tracking-[0.25em] text-[var(--muted-ink)]">今日日记</p>
+        <h1 className="mt-3 text-3xl font-semibold text-[var(--ink)]">这篇日记已锁定</h1>
+        <p className="mt-3 leading-7 text-[var(--muted-ink)]">已超过 24 小时编辑期限，日记已封存为共同回忆。</p>
+      </section>
+    );
   }
 
   return (
