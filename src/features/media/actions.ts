@@ -135,7 +135,7 @@ export async function uploadJournalImageAction(
     }
 
     if (replacementConfirmed) {
-      await cleanupJournalImage(client, {
+      const backupCleanup = await cleanupJournalImage(client, {
         spaceId,
         authorId: userId,
         entryId,
@@ -143,7 +143,9 @@ export async function uploadJournalImageAction(
         reason: "backup_cleanup_failed",
       });
       revalidateJournal(entryId);
-      return { ok: true, message: "日记已更新。", entryId };
+      return backupCleanup === "failed"
+        ? { ok: true, message: "日记已更新，但旧图备份清理未完成，请联系管理员。", entryId }
+        : { ok: true, message: "日记已更新。", entryId };
     }
 
     try {
@@ -154,6 +156,25 @@ export async function uploadJournalImageAction(
           upsert: true,
         });
         if (!restoreError) {
+          const backupCleanup = await cleanupJournalImage(client, {
+            spaceId,
+            authorId: userId,
+            entryId,
+            backupId,
+            reason: "backup_cleanup_failed",
+          });
+          if (backupCleanup === "queued") {
+            return {
+              ok: false,
+              message: "日记文字已保存，但图片替换失败，原图片仍保留；旧图备份清理已进入队列。",
+            };
+          }
+          if (backupCleanup === "failed") {
+            return {
+              ok: false,
+              message: "日记文字已保存，原图片已恢复，但旧图备份清理未完成，请联系管理员。",
+            };
+          }
           return { ok: false, message: "日记文字已保存，但图片替换失败，原图片仍保留。" };
         }
       }

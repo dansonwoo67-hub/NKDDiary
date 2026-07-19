@@ -269,7 +269,7 @@ describe("journal image server actions", () => {
     expect(client.remove).not.toHaveBeenCalled();
   });
 
-  it("keeps existing bytes when replacement upload fails after RPC succeeds", async () => {
+  it("removes the backup after a failed replacement is successfully restored", async () => {
     const client = installClient();
     client.upload
       .mockResolvedValueOnce({ data: null, error: { message: "upload failed" } })
@@ -302,11 +302,12 @@ describe("journal image server actions", () => {
       contentType: "image/webp",
       upsert: true,
     });
-    expect(client.remove).not.toHaveBeenCalled();
+    expect(client.remove).toHaveBeenCalledWith([backupPath]);
   });
 
-  it("keeps existing bytes when replacement upload throws after RPC succeeds", async () => {
+  it("reports durable queued cleanup after a failed replacement is successfully restored", async () => {
     const client = installClient();
+    client.remove.mockResolvedValue({ data: null, error: { message: "remove failed" } });
     client.upload
       .mockRejectedValueOnce(new Error("storage unavailable"))
       .mockResolvedValueOnce({ data: { path: "restored" }, error: null });
@@ -327,16 +328,56 @@ describe("journal image server actions", () => {
       content: "上传会抛错。",
     }, imageForm())).resolves.toEqual({
       ok: false,
-      message: "日记文字已保存，但图片替换失败，原图片仍保留。",
+      message: "日记文字已保存，但图片替换失败，原图片仍保留；旧图备份清理已进入队列。",
     });
 
     const backupPath = client.copy.mock.calls[0][1] as string;
+    const backupId = backupPath.split("/").at(-1)?.replace(".webp", "");
     expect(client.download).toHaveBeenCalledWith(backupPath);
     expect(client.upload).toHaveBeenNthCalledWith(2, imagePath, expect.any(Blob), {
       contentType: "image/webp",
       upsert: true,
     });
-    expect(client.remove).not.toHaveBeenCalled();
+    expect(client.remove).toHaveBeenCalledTimes(3);
+    expect(client.rpc).toHaveBeenLastCalledWith("enqueue_journal_image_cleanup", {
+      p_space_id: spaceId,
+      p_entry_id: entryId,
+      p_reason: "backup_cleanup_failed",
+      p_backup_id: backupId,
+    });
+  });
+
+  it("warns when a restored replacement backup cannot be removed or queued", async () => {
+    const client = installClient();
+    client.rpc
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: "queue failed" } });
+    client.remove.mockResolvedValue({ data: null, error: { message: "remove failed" } });
+    client.upload
+      .mockResolvedValueOnce({ data: null, error: { message: "upload failed" } })
+      .mockResolvedValueOnce({ data: { path: "restored" }, error: null });
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await expect(uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "恢复后清理失败。",
+    }, imageForm())).resolves.toEqual({
+      ok: false,
+      message: "日记文字已保存，原图片已恢复，但旧图备份清理未完成，请联系管理员。",
+    });
+
+    expect(client.remove).toHaveBeenCalledTimes(3);
+    expect(client.rpc).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the backup and queues restore when canonical upload and restore are ambiguous", async () => {
@@ -401,6 +442,37 @@ describe("journal image server actions", () => {
     expect(backupPath).toMatch(new RegExp(`^${spaceId}/${userId}/\\.backups/${entryId}/[0-9a-f-]{36}\\.webp$`));
     expect(client.upload).toHaveBeenCalledOnce();
     expect(client.remove).toHaveBeenCalledWith([backupPath]);
+  });
+
+  it("warns when a confirmed replacement backup cannot be removed or queued", async () => {
+    const client = installClient();
+    client.rpc
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: "queue failed" } });
+    client.remove.mockResolvedValue({ data: null, error: { message: "remove failed" } });
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await expect(uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "替换成功但清理失败。",
+    }, imageForm())).resolves.toEqual({
+      ok: true,
+      message: "日记已更新，但旧图备份清理未完成，请联系管理员。",
+      entryId,
+    });
+
+    expect(client.remove).toHaveBeenCalledTimes(3);
+    expect(client.rpc).toHaveBeenCalledTimes(2);
   });
 
   it("rejects an extra raw image path in media orchestration input", async () => {
