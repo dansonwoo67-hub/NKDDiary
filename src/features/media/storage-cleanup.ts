@@ -1,10 +1,15 @@
-type CleanupReason = "database_write_failed" | "diary_deleted";
+type CleanupReason =
+  | "database_write_failed"
+  | "diary_deleted"
+  | "backup_cleanup_failed"
+  | "replacement_restore_failed";
 
 type CleanupTarget = {
   spaceId: string;
   authorId: string;
   entryId: string;
   reason: CleanupReason;
+  backupId?: string;
 };
 
 type CleanupClient = {
@@ -21,11 +26,32 @@ type CleanupClient = {
 
 export type CleanupOutcome = "removed" | "queued" | "failed";
 
+export async function enqueueJournalImageReconciliation(
+  client: CleanupClient,
+  target: CleanupTarget,
+): Promise<Exclude<CleanupOutcome, "removed">> {
+  const args: Record<string, string> = {
+    p_space_id: target.spaceId,
+    p_entry_id: target.entryId,
+    p_reason: target.reason,
+  };
+  if (target.backupId) args.p_backup_id = target.backupId;
+
+  try {
+    const { error } = await client.rpc("enqueue_journal_image_cleanup", args);
+    return error ? "failed" : "queued";
+  } catch {
+    return "failed";
+  }
+}
+
 export async function cleanupJournalImage(
   client: CleanupClient,
   target: CleanupTarget,
 ): Promise<CleanupOutcome> {
-  const imagePath = `${target.spaceId}/${target.authorId}/${target.entryId}.webp`;
+  const imagePath = target.backupId
+    ? `${target.spaceId}/${target.authorId}/.backups/${target.entryId}/${target.backupId}.webp`
+    : `${target.spaceId}/${target.authorId}/${target.entryId}.webp`;
   const bucket = client.storage.from("journal-images");
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -37,14 +63,5 @@ export async function cleanupJournalImage(
     }
   }
 
-  try {
-    const { error } = await client.rpc("enqueue_journal_image_cleanup", {
-      p_space_id: target.spaceId,
-      p_entry_id: target.entryId,
-      p_reason: target.reason,
-    });
-    return error ? "failed" : "queued";
-  } catch {
-    return "failed";
-  }
+  return enqueueJournalImageReconciliation(client, target);
 }

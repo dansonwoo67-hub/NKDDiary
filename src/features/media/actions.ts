@@ -7,7 +7,10 @@ import type { JournalActionResult } from "@/features/journal/actions";
 import { getJournalEntry } from "@/features/journal/repository";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { cleanupJournalImage } from "./storage-cleanup";
+import {
+  cleanupJournalImage,
+  enqueueJournalImageReconciliation,
+} from "./storage-cleanup";
 
 const MAX_IMAGE_BYTES = 800 * 1024;
 const entryIdSchema = z.string().uuid();
@@ -104,26 +107,89 @@ export async function uploadJournalImageAction(
       return { ok: false, message: "操作失败，请稍后再试。" };
     }
 
+    const backupId = randomUUID();
+    const backupPath = `${spaceId}/${userId}/.backups/${entryId}/${backupId}.webp`;
+    try {
+      const { error: backupError } = await bucket.copy(imagePath, backupPath);
+      if (backupError) return { ok: false, message: "图片备份失败，原图片未更改。" };
+    } catch {
+      await cleanupJournalImage(client, {
+        spaceId,
+        authorId: userId,
+        entryId,
+        backupId,
+        reason: "backup_cleanup_failed",
+      });
+      return { ok: false, message: "图片备份未确认，原图片未更改。" };
+    }
+
+    let replacementConfirmed = false;
     try {
       const { error: uploadError } = await bucket.upload(imagePath, compressedImage, {
         contentType: "image/webp",
         upsert: true,
       });
-      if (!uploadError) {
-        revalidateJournal(entryId);
-        return { ok: true, message: "日记已更新。", entryId };
+      replacementConfirmed = !uploadError;
+    } catch {
+      // A transport error can arrive after Storage committed the upsert.
+    }
+
+    if (replacementConfirmed) {
+      await cleanupJournalImage(client, {
+        spaceId,
+        authorId: userId,
+        entryId,
+        backupId,
+        reason: "backup_cleanup_failed",
+      });
+      revalidateJournal(entryId);
+      return { ok: true, message: "日记已更新。", entryId };
+    }
+
+    try {
+      const { data: backupBytes, error: downloadError } = await bucket.download(backupPath);
+      if (!downloadError && backupBytes) {
+        const { error: restoreError } = await bucket.upload(imagePath, backupBytes, {
+          contentType: "image/webp",
+          upsert: true,
+        });
+        if (!restoreError) {
+          return { ok: false, message: "日记文字已保存，但图片替换失败，原图片仍保留。" };
+        }
       }
     } catch {
-      // The canonical object is never removed on replacement failure.
+      // Keep the backup until durable reconciliation is confirmed below.
     }
-    return { ok: false, message: "日记文字已保存，但图片替换失败，原图片仍保留。" };
+
+    const queued = await enqueueJournalImageReconciliation(client, {
+      spaceId,
+      authorId: userId,
+      entryId,
+      backupId,
+      reason: "replacement_restore_failed",
+    });
+    return queued === "queued"
+      ? { ok: false, message: "图片替换未确认，旧图备份已保留并进入恢复队列。" }
+      : { ok: false, message: "图片替换未确认，旧图备份已保留，请联系管理员。" };
   }
 
-  const { error: uploadError } = await bucket.upload(imagePath, compressedImage, {
-    contentType: "image/webp",
-    upsert: false,
-  });
-  if (uploadError) return { ok: false, message: "图片上传失败，请稍后再试。" };
+  try {
+    const { error: uploadError } = await bucket.upload(imagePath, compressedImage, {
+      contentType: "image/webp",
+      upsert: false,
+    });
+    if (uploadError) return { ok: false, message: "图片上传失败，请稍后再试。" };
+  } catch {
+    const cleanup = await cleanupJournalImage(client, {
+      spaceId,
+      authorId: userId,
+      entryId,
+      reason: "database_write_failed",
+    });
+    return cleanup === "failed"
+      ? { ok: false, message: "图片上传未确认，且清理未完成，请联系管理员。" }
+      : { ok: false, message: "图片上传失败，请稍后再试。" };
+  }
 
   try {
     const rpcResult = await writeDiary();

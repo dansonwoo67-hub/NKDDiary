@@ -30,19 +30,24 @@ function imageForm(size = 400 * 1024, type = "image/webp", validWebpHeader = tru
 
 function installClient(rpcResult: { data: unknown; error: unknown } = { data: null, error: null }) {
   const upload = vi.fn().mockResolvedValue({ data: { path: "uploaded" }, error: null });
+  const copy = vi.fn().mockResolvedValue({ data: { path: "copied" }, error: null });
+  const download = vi.fn().mockResolvedValue({
+    data: new Blob(["old image"], { type: "image/webp" }),
+    error: null,
+  });
   const remove = vi.fn().mockResolvedValue({ data: null, error: null });
   const createSignedUrl = vi.fn().mockResolvedValue({
     data: { signedUrl: "https://storage.example/signed" },
     error: null,
   });
-  const bucket = { upload, remove, createSignedUrl };
+  const bucket = { upload, copy, download, remove, createSignedUrl };
   const from = vi.fn((name: string) => {
     if (name !== "journal-images") throw new Error(`unexpected bucket ${name}`);
     return bucket;
   });
   const rpc = vi.fn().mockResolvedValue(rpcResult);
   mockCreateClient.mockResolvedValue({ storage: { from }, rpc } as never);
-  return { upload, remove, createSignedUrl, from, rpc };
+  return { upload, copy, download, remove, createSignedUrl, from, rpc };
 }
 
 describe("journal image server actions", () => {
@@ -97,6 +102,21 @@ describe("journal image server actions", () => {
 
     const uploadedPath = client.upload.mock.calls[0][0] as string;
     expect(client.remove).toHaveBeenCalledWith([uploadedPath]);
+  });
+
+  it("cleans a possibly committed initial upload when Storage throws", async () => {
+    const client = installClient();
+    client.upload.mockRejectedValue(new Error("connection lost after request"));
+
+    await expect(uploadJournalImageAction({
+      kind: "create-today",
+      title: "普通的一天",
+      content: "上传结果不明。",
+      entryDate: "2026-07-19",
+    }, imageForm())).resolves.toEqual({ ok: false, message: "图片上传失败，请稍后再试。" });
+
+    expect(client.remove).toHaveBeenCalledOnce();
+    expect(client.rpc).not.toHaveBeenCalledWith("create_today_diary", expect.anything());
   });
 
   it("queues orphan cleanup after three inspected remove failures", async () => {
@@ -251,7 +271,9 @@ describe("journal image server actions", () => {
 
   it("keeps existing bytes when replacement upload fails after RPC succeeds", async () => {
     const client = installClient();
-    client.upload.mockResolvedValue({ data: null, error: { message: "upload failed" } });
+    client.upload
+      .mockResolvedValueOnce({ data: null, error: { message: "upload failed" } })
+      .mockResolvedValueOnce({ data: { path: "restored" }, error: null });
     const entryId = "33333333-3333-4333-8333-333333333333";
     const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
     mockGetJournalEntry.mockResolvedValue({
@@ -273,12 +295,21 @@ describe("journal image server actions", () => {
     });
 
     expect(client.rpc.mock.invocationCallOrder[0]).toBeLessThan(client.upload.mock.invocationCallOrder[0]);
+    expect(client.copy).toHaveBeenNthCalledWith(1, imagePath, expect.stringContaining(`/.backups/${entryId}/`));
+    const backupPath = client.copy.mock.calls[0][1] as string;
+    expect(client.download).toHaveBeenCalledWith(backupPath);
+    expect(client.upload).toHaveBeenNthCalledWith(2, imagePath, expect.any(Blob), {
+      contentType: "image/webp",
+      upsert: true,
+    });
     expect(client.remove).not.toHaveBeenCalled();
   });
 
   it("keeps existing bytes when replacement upload throws after RPC succeeds", async () => {
     const client = installClient();
-    client.upload.mockRejectedValue(new Error("storage unavailable"));
+    client.upload
+      .mockRejectedValueOnce(new Error("storage unavailable"))
+      .mockResolvedValueOnce({ data: { path: "restored" }, error: null });
     const entryId = "33333333-3333-4333-8333-333333333333";
     const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
     mockGetJournalEntry.mockResolvedValue({
@@ -299,7 +330,50 @@ describe("journal image server actions", () => {
       message: "日记文字已保存，但图片替换失败，原图片仍保留。",
     });
 
+    const backupPath = client.copy.mock.calls[0][1] as string;
+    expect(client.download).toHaveBeenCalledWith(backupPath);
+    expect(client.upload).toHaveBeenNthCalledWith(2, imagePath, expect.any(Blob), {
+      contentType: "image/webp",
+      upsert: true,
+    });
     expect(client.remove).not.toHaveBeenCalled();
+  });
+
+  it("keeps the backup and queues restore when canonical upload and restore are ambiguous", async () => {
+    const client = installClient();
+    client.upload
+      .mockRejectedValueOnce(new Error("canonical result unknown"))
+      .mockRejectedValueOnce(new Error("restore result unknown"));
+    const entryId = "33333333-3333-4333-8333-333333333333";
+    const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
+    mockGetJournalEntry.mockResolvedValue({
+      id: entryId,
+      spaceId,
+      authorId: userId,
+      entryType: "today",
+      imagePath,
+    } as never);
+
+    await expect(uploadJournalImageAction({
+      kind: "update-today",
+      entryId,
+      title: "更新的一天",
+      content: "恢复结果也不明。",
+    }, imageForm())).resolves.toEqual({
+      ok: false,
+      message: "图片替换未确认，旧图备份已保留并进入恢复队列。",
+    });
+
+    const backupPath = client.copy.mock.calls[0][1] as string;
+    const backupId = backupPath.split("/").at(-1)?.replace(".webp", "");
+    expect(client.remove).not.toHaveBeenCalled();
+    expect(client.download).toHaveBeenCalledWith(backupPath);
+    expect(client.rpc).toHaveBeenLastCalledWith("enqueue_journal_image_cleanup", {
+      p_space_id: spaceId,
+      p_entry_id: entryId,
+      p_reason: "replacement_restore_failed",
+      p_backup_id: backupId,
+    });
   });
 
   it("replaces existing bytes exactly once after RPC succeeds", async () => {
@@ -321,9 +395,12 @@ describe("journal image server actions", () => {
       content: "替换成功。",
     }, imageForm());
 
-    expect(client.rpc.mock.invocationCallOrder[0]).toBeLessThan(client.upload.mock.invocationCallOrder[0]);
+    expect(client.rpc.mock.invocationCallOrder[0]).toBeLessThan(client.copy.mock.invocationCallOrder[0]);
+    expect(client.copy.mock.invocationCallOrder[0]).toBeLessThan(client.upload.mock.invocationCallOrder[0]);
+    const backupPath = client.copy.mock.calls[0][1] as string;
+    expect(backupPath).toMatch(new RegExp(`^${spaceId}/${userId}/\\.backups/${entryId}/[0-9a-f-]{36}\\.webp$`));
     expect(client.upload).toHaveBeenCalledOnce();
-    expect(client.remove).not.toHaveBeenCalled();
+    expect(client.remove).toHaveBeenCalledWith([backupPath]);
   });
 
   it("rejects an extra raw image path in media orchestration input", async () => {

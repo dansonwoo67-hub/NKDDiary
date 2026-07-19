@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { cleanupJournalImage } from "./storage-cleanup";
+import {
+  cleanupJournalImage,
+  enqueueJournalImageReconciliation,
+} from "./storage-cleanup";
 
 const target = {
   spaceId: "22222222-2222-4222-8222-222222222222",
@@ -60,5 +63,37 @@ describe("cleanupJournalImage", () => {
 
     expect(remove).toHaveBeenCalledTimes(3);
     expect(rpc).toHaveBeenCalledOnce();
+  });
+});
+
+describe("enqueueJournalImageReconciliation", () => {
+  it("queues a scoped backup restore without deleting the retained backup", async () => {
+    const { client, remove, rpc } = installClient();
+    const backupId = "44444444-4444-4444-8444-444444444444";
+
+    await expect(enqueueJournalImageReconciliation(client, {
+      ...target,
+      reason: "replacement_restore_failed",
+      backupId,
+    })).resolves.toBe("queued");
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledWith("enqueue_journal_image_cleanup", {
+      p_space_id: target.spaceId,
+      p_entry_id: target.entryId,
+      p_reason: "replacement_restore_failed",
+      p_backup_id: backupId,
+    });
+  });
+
+  it("reports an enqueue failure explicitly", async () => {
+    const { client, rpc } = installClient();
+    rpc.mockRejectedValue(new Error("database unavailable"));
+
+    await expect(enqueueJournalImageReconciliation(client, {
+      ...target,
+      reason: "replacement_restore_failed",
+      backupId: "44444444-4444-4444-8444-444444444444",
+    })).resolves.toBe("failed");
   });
 });

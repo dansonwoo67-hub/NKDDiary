@@ -21,7 +21,7 @@ describe("private journal image storage migration", () => {
     expect(migration).not.toMatch(/'journal-images'[^;]*getpublicurl/);
   });
 
-  it("allows uploads only to the authenticated active member's three-part path", () => {
+  it("allows only canonical or server-derived scoped backup paths for active owners", () => {
     const migration = readMigration();
 
     expect(migration).toContain('create policy "authors can upload journal images"');
@@ -32,6 +32,10 @@ describe("private journal image storage migration", () => {
     expect(migration).toContain("member.active");
     expect(migration).toContain("(storage.foldername(name))[2] = (select auth.uid())::text");
     expect(migration).toContain("array_length(storage.foldername(name), 1) = 2");
+    expect(migration).toContain("array_length(storage.foldername(name), 1) = 4");
+    expect(migration).toContain("(storage.foldername(name))[3] = '.backups'");
+    expect(migration).toContain("journal.id::text = (storage.foldername(name))[4]");
+    expect(migration).toContain("journal.image_path = journal.space_id::text || '/' || journal.author_id::text || '/' || journal.id::text || '.webp'");
     expect(migration).toMatch(/storage\.filename\(name\)[^\n]*\\\.webp/);
   });
 
@@ -44,6 +48,8 @@ describe("private journal image storage migration", () => {
     expect(migration).toContain("journal.author_id = (select auth.uid())");
     expect(migration).toMatch(/journal\.recipient_id = \(select auth\.uid\(\)\)\s+and journal\.opened_at is not null/);
     expect(migration).not.toContain("now() >= journal.open_at");
+    expect(migration).toContain("(storage.foldername(name))[3] = '.backups'");
+    expect(migration).toContain("journal.author_id = (select auth.uid())");
   });
 
   it("allows deletes only for active owners with canonical orphan or editable-today targets", () => {
@@ -67,13 +73,15 @@ describe("private journal image storage migration", () => {
     const migration = readMigration();
 
     expect(migration).toContain("create table public.journal_image_cleanup_jobs");
+    expect(migration).toContain("backup_id uuid");
     expect(migration).not.toMatch(/journal_image_cleanup_jobs[\s\S]{0,600}object_path/);
     expect(migration).toContain("revoke all on table public.journal_image_cleanup_jobs from public, anon, authenticated");
     expect(migration).toContain("grant select, update, delete on table public.journal_image_cleanup_jobs to service_role");
     expect(migration).toContain("create or replace function public.enqueue_journal_image_cleanup");
     expect(migration).toContain("public.is_active_space_member(p_space_id, v_user_id)");
-    expect(migration).toContain("p_reason not in ('database_write_failed', 'diary_deleted')");
-    expect(migration).toContain("grant execute on function public.enqueue_journal_image_cleanup(uuid, uuid, text) to authenticated");
+    expect(migration).toContain("'backup_cleanup_failed'");
+    expect(migration).toContain("'replacement_restore_failed'");
+    expect(migration).toContain("grant execute on function public.enqueue_journal_image_cleanup(uuid, uuid, text, uuid) to authenticated");
   });
 
   it("prevents cleanup queueing for a retained locked or future canonical image", () => {
@@ -82,10 +90,44 @@ describe("private journal image storage migration", () => {
     const end = migration.indexOf("\n$$;", start);
     const definition = migration.slice(start, end);
 
-    expect(definition).toContain("journal.image_path = v_image_path");
+    expect(definition).toContain("journal.image_path = v_canonical_path");
     expect(definition).toContain("journal.entry_type <> 'today'");
     expect(definition).toContain("clock_timestamp() > journal.locked_at");
     expect(definition).toContain("raise exception 'journal image is retained'");
+  });
+
+  it("rejects fabricated cleanup targets and derives every object path inside SQL", () => {
+    const migration = readMigration();
+    const start = migration.indexOf("create or replace function public.enqueue_journal_image_cleanup");
+    const end = migration.indexOf("\n$$;", start);
+    const definition = migration.slice(start, end);
+
+    expect(definition).toContain("p_backup_id uuid default null");
+    expect(definition).toContain("from storage.objects as object");
+    expect(definition).toContain("object.bucket_id = 'journal-images'");
+    expect(definition).toContain("object.name = v_target_path");
+    expect(definition).toContain("object.owner_id = v_user_id::text");
+    expect(definition).toContain("raise exception 'cleanup target not found'");
+    expect(definition).toContain("journal.id = p_entry_id");
+    expect(definition).toContain("journal.space_id = p_space_id");
+    expect(definition).toContain("journal.author_id = v_user_id");
+    expect(definition).toContain("raise exception 'backup provenance not found'");
+    expect(definition).not.toContain("p_object_path");
+  });
+
+  it("deduplicates cleanup work and caps pending jobs per author and space", () => {
+    const migration = readMigration();
+    const start = migration.indexOf("create or replace function public.enqueue_journal_image_cleanup");
+    const end = migration.indexOf("\n$$;", start);
+    const definition = migration.slice(start, end);
+
+    expect(migration).toContain("coalesce(backup_id, '00000000-0000-0000-0000-000000000000'::uuid)");
+    expect(definition).toContain("backup_id is not distinct from p_backup_id");
+    expect(definition).toContain("count(*) >= 20");
+    expect(definition).toContain("raise exception 'cleanup queue limit exceeded'");
+    expect(definition.indexOf("backup_id is not distinct from p_backup_id")).toBeLessThan(
+      definition.indexOf("count(*) >= 20"),
+    );
   });
 
   it.each(["create_today_diary", "seal_future_diary"])(

@@ -10,21 +10,37 @@ create table public.journal_image_cleanup_jobs (
   space_id uuid not null,
   author_id uuid not null,
   entry_id uuid not null,
-  reason text not null check (reason in ('database_write_failed', 'diary_deleted')),
+  backup_id uuid,
+  reason text not null check (reason in (
+    'database_write_failed',
+    'diary_deleted',
+    'backup_cleanup_failed',
+    'replacement_restore_failed'
+  )),
   attempts integer not null default 0 check (attempts >= 0),
   requested_at timestamptz not null default now(),
-  last_attempt_at timestamptz,
-  unique (space_id, author_id, entry_id)
+  last_attempt_at timestamptz
+);
+
+create unique index journal_image_cleanup_jobs_target_key
+on public.journal_image_cleanup_jobs (
+  space_id,
+  author_id,
+  entry_id,
+  reason,
+  (coalesce(backup_id, '00000000-0000-0000-0000-000000000000'::uuid))
 );
 
 alter table public.journal_image_cleanup_jobs enable row level security;
 revoke all on table public.journal_image_cleanup_jobs from public, anon, authenticated;
 grant select, update, delete on table public.journal_image_cleanup_jobs to service_role;
 
+drop function if exists public.enqueue_journal_image_cleanup(uuid, uuid, text);
 create or replace function public.enqueue_journal_image_cleanup(
   p_space_id uuid,
   p_entry_id uuid,
-  p_reason text
+  p_reason text,
+  p_backup_id uuid default null
 )
 returns void
 language plpgsql
@@ -33,25 +49,40 @@ set search_path = ''
 as $$
 declare
   v_user_id uuid := auth.uid();
-  v_image_path text;
+  v_canonical_path text;
+  v_target_path text;
 begin
   if v_user_id is null
     or not public.is_active_space_member(p_space_id, v_user_id)
   then
     raise exception 'active space membership required' using errcode = '42501';
   end if;
-  if p_reason not in ('database_write_failed', 'diary_deleted') then
+  if p_reason not in (
+    'database_write_failed',
+    'diary_deleted',
+    'backup_cleanup_failed',
+    'replacement_restore_failed'
+  ) then
     raise exception 'invalid cleanup reason' using errcode = '22023';
   end if;
+  if (p_reason in ('backup_cleanup_failed', 'replacement_restore_failed')) <> (p_backup_id is not null) then
+    raise exception 'cleanup target does not match reason' using errcode = '22023';
+  end if;
 
-  v_image_path := p_space_id::text || '/' || v_user_id::text || '/' || p_entry_id::text || '.webp';
-  if exists (
+  v_canonical_path := p_space_id::text || '/' || v_user_id::text || '/' || p_entry_id::text || '.webp';
+  v_target_path := case
+    when p_backup_id is null then v_canonical_path
+    else p_space_id::text || '/' || v_user_id::text || '/.backups/'
+      || p_entry_id::text || '/' || p_backup_id::text || '.webp'
+  end;
+
+  if p_backup_id is null and exists (
     select 1
     from public.journal_entries as journal
     where journal.id = p_entry_id
       and journal.space_id = p_space_id
       and journal.author_id = v_user_id
-      and journal.image_path = v_image_path
+      and journal.image_path = v_canonical_path
       and (
         journal.entry_type <> 'today'
         or clock_timestamp() > journal.locked_at
@@ -60,20 +91,63 @@ begin
     raise exception 'journal image is retained' using errcode = '55000';
   end if;
 
+  if p_backup_id is not null and not exists (
+    select 1
+    from public.journal_entries as journal
+    where journal.id = p_entry_id
+      and journal.space_id = p_space_id
+      and journal.author_id = v_user_id
+      and journal.entry_type = 'today'
+      and journal.image_path = v_canonical_path
+  ) then
+    raise exception 'backup provenance not found' using errcode = '42501';
+  end if;
+
+  if not exists (
+    select 1
+    from storage.objects as object
+    where object.bucket_id = 'journal-images'
+      and object.name = v_target_path
+      and object.owner_id = v_user_id::text
+  ) then
+    raise exception 'cleanup target not found' using errcode = 'P0002';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_space_id::text || '/' || v_user_id::text, 0)
+  );
+
+  update public.journal_image_cleanup_jobs
+  set requested_at = now()
+  where space_id = p_space_id
+    and author_id = v_user_id
+    and entry_id = p_entry_id
+    and reason = p_reason
+    and backup_id is not distinct from p_backup_id;
+  if found then
+    return;
+  end if;
+
+  if (
+    select count(*) >= 20
+    from public.journal_image_cleanup_jobs
+    where space_id = p_space_id
+      and author_id = v_user_id
+  ) then
+    raise exception 'cleanup queue limit exceeded' using errcode = '54000';
+  end if;
+
   insert into public.journal_image_cleanup_jobs (
-    space_id, author_id, entry_id, reason
+    space_id, author_id, entry_id, backup_id, reason
   ) values (
-    p_space_id, v_user_id, p_entry_id, p_reason
-  )
-  on conflict (space_id, author_id, entry_id) do update
-  set reason = excluded.reason,
-      requested_at = now();
+    p_space_id, v_user_id, p_entry_id, p_backup_id, p_reason
+  );
 end;
 $$;
 
-revoke execute on function public.enqueue_journal_image_cleanup(uuid, uuid, text)
+revoke execute on function public.enqueue_journal_image_cleanup(uuid, uuid, text, uuid)
 from public, anon, authenticated;
-grant execute on function public.enqueue_journal_image_cleanup(uuid, uuid, text) to authenticated;
+grant execute on function public.enqueue_journal_image_cleanup(uuid, uuid, text, uuid) to authenticated;
 
 drop policy if exists "authors can upload journal images" on storage.objects;
 create policy "authors can upload journal images"
@@ -81,47 +155,6 @@ on storage.objects for insert to authenticated
 with check (
   bucket_id = 'journal-images'
   and owner_id = (select auth.uid())::text
-  and array_length(storage.foldername(name), 1) = 2
-  and (storage.foldername(name))[2] = (select auth.uid())::text
-  and storage.filename(name) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$'
-  and exists (
-    select 1
-    from public.space_members as member
-    where member.space_id::text = (storage.foldername(name))[1]
-      and member.user_id = (select auth.uid())
-      and member.active
-  )
-);
-
-drop policy if exists "authors can update journal images" on storage.objects;
-create policy "authors can update journal images"
-on storage.objects for update to authenticated
-using (
-  bucket_id = 'journal-images'
-  and owner_id = (select auth.uid())::text
-)
-with check (
-  bucket_id = 'journal-images'
-  and owner_id = (select auth.uid())::text
-  and array_length(storage.foldername(name), 1) = 2
-  and (storage.foldername(name))[2] = (select auth.uid())::text
-  and storage.filename(name) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$'
-  and exists (
-    select 1
-    from public.space_members as member
-    where member.space_id::text = (storage.foldername(name))[1]
-      and member.user_id = (select auth.uid())
-      and member.active
-  )
-);
-
-drop policy if exists "authors can remove journal images" on storage.objects;
-create policy "authors can remove journal images"
-on storage.objects for delete to authenticated
-using (
-  bucket_id = 'journal-images'
-  and owner_id = (select auth.uid())::text
-  and array_length(storage.foldername(name), 1) = 2
   and (storage.foldername(name))[2] = (select auth.uid())::text
   and storage.filename(name) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$'
   and exists (
@@ -132,18 +165,114 @@ using (
       and member.active
   )
   and (
-    not exists (
-      select 1
-      from public.journal_entries as journal
-      where journal.image_path = storage.objects.name
+    array_length(storage.foldername(name), 1) = 2
+    or (
+      array_length(storage.foldername(name), 1) = 4
+      and (storage.foldername(name))[3] = '.backups'
+      and exists (
+        select 1
+        from public.journal_entries as journal
+        where journal.id::text = (storage.foldername(name))[4]
+          and journal.space_id::text = (storage.foldername(name))[1]
+          and journal.author_id = (select auth.uid())
+          and journal.entry_type = 'today'
+          and clock_timestamp() <= journal.locked_at
+          and journal.image_path = journal.space_id::text || '/' || journal.author_id::text || '/' || journal.id::text || '.webp'
+      )
     )
-    or exists (
-      select 1
-      from public.journal_entries as journal
-      where journal.image_path = storage.objects.name
-        and journal.entry_type = 'today'
-        and journal.author_id = (select auth.uid())
-        and clock_timestamp() <= journal.locked_at
+  )
+);
+
+drop policy if exists "authors can update journal images" on storage.objects;
+create policy "authors can update journal images"
+on storage.objects for update to authenticated
+using (
+  bucket_id = 'journal-images'
+  and owner_id = (select auth.uid())::text
+  and array_length(storage.foldername(name), 1) = 2
+  and (storage.foldername(name))[2] = (select auth.uid())::text
+  and exists (
+    select 1
+    from public.journal_entries as journal
+    where journal.id::text || '.webp' = storage.filename(name)
+      and journal.space_id::text = (storage.foldername(name))[1]
+      and journal.author_id = (select auth.uid())
+      and journal.entry_type = 'today'
+      and clock_timestamp() <= journal.locked_at
+      and journal.image_path = storage.objects.name
+  )
+)
+with check (
+  bucket_id = 'journal-images'
+  and owner_id = (select auth.uid())::text
+  and array_length(storage.foldername(name), 1) = 2
+  and (storage.foldername(name))[2] = (select auth.uid())::text
+  and storage.filename(name) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$'
+  and exists (
+    select 1
+    from public.space_members as member
+    where member.space_id::text = (storage.foldername(name))[1]
+      and member.user_id = (select auth.uid())
+      and member.active
+  )
+  and exists (
+    select 1
+    from public.journal_entries as journal
+    where journal.id::text || '.webp' = storage.filename(name)
+      and journal.space_id::text = (storage.foldername(name))[1]
+      and journal.author_id = (select auth.uid())
+      and journal.entry_type = 'today'
+      and clock_timestamp() <= journal.locked_at
+      and journal.image_path = storage.objects.name
+  )
+);
+
+drop policy if exists "authors can remove journal images" on storage.objects;
+create policy "authors can remove journal images"
+on storage.objects for delete to authenticated
+using (
+  bucket_id = 'journal-images'
+  and owner_id = (select auth.uid())::text
+  and (storage.foldername(name))[2] = (select auth.uid())::text
+  and storage.filename(name) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.webp$'
+  and exists (
+    select 1
+    from public.space_members as member
+    where member.space_id::text = (storage.foldername(name))[1]
+      and member.user_id = (select auth.uid())
+      and member.active
+  )
+  and (
+    (
+      array_length(storage.foldername(name), 1) = 2
+      and (
+        not exists (
+          select 1
+          from public.journal_entries as journal
+          where journal.image_path = storage.objects.name
+        )
+        or exists (
+          select 1
+          from public.journal_entries as journal
+          where journal.image_path = storage.objects.name
+            and journal.entry_type = 'today'
+            and journal.author_id = (select auth.uid())
+            and clock_timestamp() <= journal.locked_at
+        )
+      )
+    )
+    or (
+      array_length(storage.foldername(name), 1) = 4
+      and (storage.foldername(name))[3] = '.backups'
+      and exists (
+        select 1
+        from public.journal_entries as journal
+        where journal.id::text = (storage.foldername(name))[4]
+          and journal.space_id::text = (storage.foldername(name))[1]
+          and journal.author_id = (select auth.uid())
+          and journal.entry_type = 'today'
+          and journal.image_path = journal.space_id::text || '/' || journal.author_id::text || '/' || journal.id::text || '.webp'
+      )
     )
   )
 );
@@ -153,20 +282,38 @@ create policy "authorized readers can read journal images"
 on storage.objects for select to authenticated
 using (
   bucket_id = 'journal-images'
-  and exists (
-    select 1
-    from public.journal_entries as journal
-    where journal.image_path = storage.objects.name
-      and journal.image_path = journal.space_id::text || '/' || journal.author_id::text || '/' || journal.id::text || '.webp'
-      and public.is_active_space_member(journal.space_id, auth.uid())
-      and (
-        journal.entry_type = 'today'
-        or journal.author_id = (select auth.uid())
-        or (
-          journal.recipient_id = (select auth.uid())
-          and journal.opened_at is not null
+  and (
+    exists (
+      select 1
+      from public.journal_entries as journal
+      where journal.image_path = storage.objects.name
+        and journal.image_path = journal.space_id::text || '/' || journal.author_id::text || '/' || journal.id::text || '.webp'
+        and public.is_active_space_member(journal.space_id, auth.uid())
+        and (
+          journal.entry_type = 'today'
+          or journal.author_id = (select auth.uid())
+          or (
+            journal.recipient_id = (select auth.uid())
+            and journal.opened_at is not null
+          )
         )
+    )
+    or (
+      owner_id = (select auth.uid())::text
+      and array_length(storage.foldername(name), 1) = 4
+      and (storage.foldername(name))[2] = (select auth.uid())::text
+      and (storage.foldername(name))[3] = '.backups'
+      and exists (
+        select 1
+        from public.journal_entries as journal
+        where journal.id::text = (storage.foldername(name))[4]
+          and journal.space_id::text = (storage.foldername(name))[1]
+          and journal.author_id = (select auth.uid())
+          and journal.entry_type = 'today'
+          and journal.image_path = journal.space_id::text || '/' || journal.author_id::text || '/' || journal.id::text || '.webp'
+          and public.is_active_space_member(journal.space_id, auth.uid())
       )
+    )
   )
 );
 
