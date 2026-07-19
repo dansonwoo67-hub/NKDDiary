@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveFutureState, getChinaDate } from "./domain";
+import { canManageTodayDiary, deriveFutureState, getChinaDate, isTodayDiaryLocked } from "./domain";
 
 describe("future diary domain", () => {
   it("uses the Shanghai calendar date", () => {
@@ -20,5 +20,17 @@ describe("future diary domain", () => {
     };
 
     expect(deriveFutureState(entry, new Date("2026-08-01T11:00:00Z"))).toBe("opened");
+  });
+});
+
+describe("today diary domain", () => {
+  it("allows only the author before the server-provided lock time", () => {
+    const entry = { entryType: "today" as const, authorId: "author", lockedAt: "2026-07-20T10:00:00Z" };
+
+    expect(canManageTodayDiary(entry, "author", new Date("2026-07-20T09:59:59Z"))).toBe(true);
+    expect(canManageTodayDiary(entry, "partner", new Date("2026-07-20T09:59:59Z"))).toBe(false);
+    expect(canManageTodayDiary(entry, "author", new Date("2026-07-20T10:00:00Z"))).toBe(false);
+    expect(isTodayDiaryLocked(entry, new Date("2026-07-20T09:59:59Z"))).toBe(false);
+    expect(isTodayDiaryLocked(entry, new Date("2026-07-20T10:00:00Z"))).toBe(true);
   });
 });

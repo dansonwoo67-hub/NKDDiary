@@ -3,6 +3,7 @@ import {
   FULL_ENTRY_FIELDS,
   FUTURE_CARD_FIELDS,
   getJournalEntry,
+  listTodayDiaryEntries,
   listFutureDiaryCards,
 } from "./repository";
 
@@ -46,7 +47,7 @@ describe("journal repository", () => {
     );
     expect(FUTURE_CARD_FIELDS).not.toMatch(/title|content|image_path/);
     expect(FULL_ENTRY_FIELDS).toBe(
-      "id, space_id, author_id, recipient_id, entry_type, title, content, image_path, entry_date, published_at, locked_at, sealed_at, open_at, opened_at",
+      "id, space_id, author_id, recipient_id, entry_type, title, content, image_path, entry_date, published_at, updated_at, locked_at, sealed_at, open_at, opened_at",
     );
   });
 
@@ -62,6 +63,19 @@ describe("journal repository", () => {
     expect(eq).toHaveBeenCalledWith("id", "protected-id");
   });
 
+  it("lists visible today diaries through the shared full-entry projection", async () => {
+    const order = vi.fn().mockResolvedValue({ data: [], error: null });
+    const eq = vi.fn().mockReturnValue({ order });
+    const select = vi.fn().mockReturnValue({ eq });
+    const from = vi.fn().mockReturnValue({ select });
+
+    await expect(listTodayDiaryEntries({ from } as never)).resolves.toEqual([]);
+    expect(from).toHaveBeenCalledWith("journal_entries");
+    expect(select).toHaveBeenCalledWith(FULL_ENTRY_FIELDS);
+    expect(eq).toHaveBeenCalledWith("entry_type", "today");
+    expect(order).toHaveBeenCalledWith("published_at", { ascending: false });
+  });
+
   it("maps a visible full journal row without creating a signed image URL", async () => {
     const maybeSingle = vi.fn().mockResolvedValue({
       data: {
@@ -75,6 +89,7 @@ describe("journal repository", () => {
         image_path: "author/photo.webp",
         entry_date: "2026-07-19",
         published_at: "2026-07-19T10:00:00Z",
+        updated_at: "2026-07-19T11:00:00Z",
         locked_at: "2026-07-20T10:00:00Z",
         sealed_at: null,
         open_at: null,
@@ -87,7 +102,12 @@ describe("journal repository", () => {
     const from = vi.fn().mockReturnValue({ select });
 
     await expect(getJournalEntry({ from } as never, "entry-1")).resolves.toEqual(
-      expect.objectContaining({ id: "entry-1", authorId: "author", imagePath: "author/photo.webp" }),
+      expect.objectContaining({
+        id: "entry-1",
+        authorId: "author",
+        imagePath: "author/photo.webp",
+        updatedAt: "2026-07-19T11:00:00Z",
+      }),
     );
   });
 });
