@@ -68,6 +68,33 @@ describe("FutureDiaryEditor", () => {
     expect(action).not.toHaveBeenCalled();
   });
 
+  it("marks all required future diary controls for browser and assistive validation", () => {
+    render(<FutureDiaryEditor recipientId={recipientId} recipientName="小楠" action={vi.fn()} />);
+
+    for (const control of [
+      screen.getByLabelText("标题"),
+      screen.getByLabelText("正文"),
+      screen.getByLabelText("开启时间"),
+    ]) {
+      expect(control).toBeRequired();
+      expect(control).toHaveAttribute("aria-required", "true");
+    }
+  });
+
+  it("recovers from a rejected seal action without revealing its error", async () => {
+    const action = vi.fn().mockRejectedValue(new Error("protected row exists with title 秘密"));
+    render(<FutureDiaryEditor recipientId={recipientId} recipientName="小楠" action={action} />);
+    fireEvent.change(screen.getByLabelText("标题"), { target: { value: "写给以后" } });
+    fireEvent.change(screen.getByLabelText("正文"), { target: { value: "到那天再读。" } });
+    fireEvent.change(screen.getByLabelText("开启时间"), { target: { value: "2026-08-01T20:30" } });
+    fireEvent.click(screen.getByRole("button", { name: "确认封存" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("操作失败，请稍后再试。");
+    await waitFor(() => expect(screen.getByRole("button", { name: "确认封存" })).toBeEnabled());
+    expect(document.body).not.toHaveTextContent("protected row");
+    expect(document.body).not.toHaveTextContent("秘密");
+  });
+
   it("sends an optional compressed Blob through the server-owned future upload flow", async () => {
     const compressed = new Blob([new Uint8Array(400)], { type: "image/webp" });
     mockCompress.mockResolvedValue(compressed);

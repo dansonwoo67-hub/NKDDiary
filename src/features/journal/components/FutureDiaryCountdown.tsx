@@ -42,12 +42,19 @@ export function FutureDiaryCountdown({ openAt, onReady }: FutureDiaryCountdownPr
   }, [openAt]);
 
   return (
-    <p className="mt-3 text-sm text-[var(--muted-ink)]" role="status" aria-live="polite">
+    <div className="mt-3 text-sm text-[var(--muted-ink)]">
+      <p aria-hidden="true">
       {remaining === null
         ? "正在同步开启时间…"
         : remaining === 0
           ? "已到开启时间，请确认开启。"
           : `距离可开启：${formatRemaining(remaining)}`}
-    </p>
+      </p>
+      {remaining === 0 ? (
+        <p className="sr-only" role="status" aria-live="polite">
+          已到开启时间，可以开启时间胶囊。
+        </p>
+      ) : null}
+    </div>
   );
 }

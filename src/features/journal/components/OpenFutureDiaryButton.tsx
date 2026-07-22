@@ -13,10 +13,15 @@ export function OpenFutureDiaryButton({ entryId }: { entryId: string }) {
   function handleOpen() {
     if (!window.confirm("确定现在开启这颗时间胶囊吗？开启后内容将对你可见。")) return;
     startTransition(async () => {
-      const result = await openFutureDiaryAction(entryId);
-      setMessage(result.message);
-      setIsError(!result.ok);
-      if (result.ok) router.refresh();
+      try {
+        const result = await openFutureDiaryAction(entryId);
+        setMessage(result.message);
+        setIsError(!result.ok);
+        if (result.ok) router.refresh();
+      } catch {
+        setMessage("操作失败，请稍后再试。");
+        setIsError(true);
+      }
     });
   }
 

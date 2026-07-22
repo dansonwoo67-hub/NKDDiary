@@ -62,22 +62,27 @@ export function FutureDiaryEditor({ recipientId, recipientName, action }: Future
     }
 
     startTransition(async () => {
-      const submission = {
-        title: title.trim(),
-        content: content.trim(),
-        recipientId,
-        openAt: openingIso,
-      };
-      let result: JournalActionResult;
-      if (image) {
-        const formData = new FormData();
-        formData.set("image", image, "journal.webp");
-        result = await uploadJournalImageAction({ kind: "seal-future", ...submission }, formData);
-      } else {
-        result = await action(submission);
+      try {
+        const submission = {
+          title: title.trim(),
+          content: content.trim(),
+          recipientId,
+          openAt: openingIso,
+        };
+        let result: JournalActionResult;
+        if (image) {
+          const formData = new FormData();
+          formData.set("image", image, "journal.webp");
+          result = await uploadJournalImageAction({ kind: "seal-future", ...submission }, formData);
+        } else {
+          result = await action(submission);
+        }
+        setIsError(!result.ok);
+        setMessage(result.message);
+      } catch {
+        setIsError(true);
+        setMessage("操作失败，请稍后再试。");
       }
-      setIsError(!result.ok);
-      setMessage(result.message);
     });
   }
 
@@ -90,13 +95,13 @@ export function FutureDiaryEditor({ recipientId, recipientName, action }: Future
       </section>
       <section className="hand-card rounded-[2rem] p-6">
         <label className="block text-sm text-[var(--ink)]" htmlFor="future-diary-title">标题</label>
-        <input id="future-diary-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={80} className="mt-2 w-full rounded-2xl border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 outline-none" />
+        <input id="future-diary-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={80} required aria-required="true" className="mt-2 w-full rounded-2xl border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 outline-none" />
         <p className="mt-2 text-right text-xs text-[var(--muted-ink)]">{countCharacters(title)}/80</p>
         <label className="mt-5 block text-sm text-[var(--ink)]" htmlFor="future-diary-content">正文</label>
-        <textarea id="future-diary-content" value={content} onChange={(event) => setContent(event.target.value)} maxLength={20_000} rows={12} className="mt-2 w-full rounded-[1.5rem] border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 leading-7 outline-none" />
+        <textarea id="future-diary-content" value={content} onChange={(event) => setContent(event.target.value)} maxLength={20_000} rows={12} required aria-required="true" className="mt-2 w-full rounded-[1.5rem] border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 leading-7 outline-none" />
         <p className="mt-2 text-right text-xs text-[var(--muted-ink)]">{countCharacters(content)}/20000</p>
         <label className="mt-5 block text-sm text-[var(--ink)]" htmlFor="future-diary-open-at">开启时间</label>
-        <input id="future-diary-open-at" type="datetime-local" value={openAt} onChange={(event) => setOpenAt(event.target.value)} aria-describedby="future-diary-time-help" className="mt-2 w-full rounded-2xl border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 outline-none" />
+        <input id="future-diary-open-at" type="datetime-local" value={openAt} onChange={(event) => setOpenAt(event.target.value)} required aria-required="true" aria-describedby="future-diary-time-help" className="mt-2 w-full rounded-2xl border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 outline-none" />
         <p id="future-diary-time-help" className="mt-2 text-xs text-[var(--muted-ink)]">按中国标准时间（Asia/Shanghai）设置，必须晚于现在。</p>
         <ImagePicker value={image} onChange={setImage} disabled={isPending} />
         {message ? <p className="mt-5 rounded-2xl bg-white/60 px-4 py-3 text-sm text-[var(--muted-ink)]" role={isError ? "alert" : "status"}>{message}</p> : null}
