@@ -38,13 +38,21 @@ export async function getUnreadNotifications(): Promise<NotificationItem[]> {
     }
   }
 
-  return notifications.map((item) => ({
-    id: String(item.id),
-    title: String(item.title),
-    body: String(item.body),
-    href: letterDates.has(String(item.source_id)) ? `/letters/${letterDates.get(String(item.source_id))}` : "/",
-    createdAt: String(item.created_at),
-  }));
+  return notifications.map((item) => {
+    const sourceId = String(item.source_id);
+    const href = item.type === "future_diary_opened"
+      ? `/journal/${sourceId}`
+      : letterDates.has(sourceId)
+        ? `/letters/${letterDates.get(sourceId)}`
+        : "/";
+    return {
+      id: String(item.id),
+      title: String(item.title),
+      body: String(item.body),
+      href,
+      createdAt: String(item.created_at),
+    };
+  });
 }
 
 export async function markNotificationReadAction(id: string): Promise<ActionResult> {

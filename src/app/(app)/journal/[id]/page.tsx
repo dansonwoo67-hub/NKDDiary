@@ -8,6 +8,8 @@ import { getJournalEntry } from "@/features/journal/repository";
 import { getReadableImageUrl } from "@/features/media/actions";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getJournalInteractions } from "@/features/interactions/actions";
+import { canInteract } from "@/features/interactions/rules";
 
 type JournalEntryPageProps = {
   params: Promise<{ id: string }>;
@@ -20,6 +22,11 @@ export default async function JournalEntryPage({ params }: JournalEntryPageProps
   if (!entry) notFound();
 
   const imageUrl = entry.imagePath ? await getReadableImageUrl(entry.id) : null;
+  const interactionsEnabled = canInteract(
+    { entryType: entry.entryType, openedAt: entry.openedAt },
+    entry.authorId === currentUser.userId ? "author" : "recipient",
+  );
+  const interactions = interactionsEnabled ? await getJournalInteractions(entry.id) : undefined;
 
   const canManage = canManageTodayDiary(entry, currentUser.userId);
   const todayDiaryState =
@@ -49,6 +56,7 @@ export default async function JournalEntryPage({ params }: JournalEntryPageProps
           className="max-h-[40rem] w-full rounded-[1.5rem] object-contain"
         />
       ) : undefined}
+      interactions={interactions}
     />
   );
 }

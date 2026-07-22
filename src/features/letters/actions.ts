@@ -263,7 +263,7 @@ export async function getLettersForDate(date: string): Promise<LetterDayView> {
   const { data, error } = await supabase
     .from("letters")
     .select(
-      "id, author_id, letter_date, body, self_mood_value, meal_value, health_value, seven_char_line, profiles:author_id(display_name, avatar_url), letter_open_responses(reader_id, response_text), annotations(id, quoted_text, comment, profiles:author_id(display_name), annotation_replies(id, body, profiles:author_id(display_name)))",
+      "id, author_id, letter_date, body, self_mood_value, meal_value, health_value, seven_char_line, profiles:author_id(display_name, avatar_url), letter_open_responses(reader_id, response_text), annotations(id, quoted_text, comment, profiles:author_id(display_name), letter_annotation_replies(id, body, profiles:author_id(display_name)))",
     )
     .eq("letter_date", date)
     .order("created_at", { ascending: true });
@@ -294,7 +294,7 @@ export async function getLettersForDate(date: string): Promise<LetterDayView> {
       openResponseText: response?.response_text ? String(response.response_text) : null,
       annotations: annotations.map((annotation) => {
         const annotationProfile = Array.isArray(annotation.profiles) ? annotation.profiles[0] : annotation.profiles;
-        const replies = Array.isArray(annotation.annotation_replies) ? annotation.annotation_replies : [];
+        const replies = Array.isArray(annotation.letter_annotation_replies) ? annotation.letter_annotation_replies : [];
 
         return {
           id: String(annotation.id),

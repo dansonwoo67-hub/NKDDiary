@@ -119,4 +119,22 @@ describe("JournalReader", () => {
     expect(screen.queryByRole("link", { name: "编辑日记" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "删除日记" })).not.toBeInTheDocument();
   });
+
+  it("renders comments and body-only annotations when interactions are enabled", () => {
+    render(
+      <JournalReader
+        entry={entry}
+        authorName="小丹"
+        canManageTodayDiary={false}
+        todayDiaryState="author-only"
+        interactions={{
+          comments: [{ id: "comment-1", body: "写得真好", authorId: "b", authorName: "对方", createdAt: "2026-07-20T01:00:00Z", updatedAt: "2026-07-20T01:00:00Z", canManage: false }],
+          annotations: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("写得真好")).toBeVisible();
+    expect(document.querySelector('[data-block-id="body"]')).toHaveTextContent(entry.content);
+  });
 });

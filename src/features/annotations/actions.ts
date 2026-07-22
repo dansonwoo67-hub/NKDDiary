@@ -68,7 +68,7 @@ export async function createAnnotationReplyAction(input: { annotationId: string;
 
   if (annotationError || !annotation) return { ok: false, message: annotationError?.message ?? "没有找到这条评点。" };
 
-  const { error } = await supabase.from("annotation_replies").insert({
+  const { error } = await supabase.from("letter_annotation_replies").insert({
     annotation_id: input.annotationId,
     author_id: userId,
     body,

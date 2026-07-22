@@ -12,8 +12,8 @@ export async function NotificationBell() {
 
   return (
     <details className="relative">
-      <summary className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-white/70 px-3 py-1">
-        信息
+      <summary aria-label={`提醒${notifications.length > 0 ? `，${notifications.length} 条未读` : ""}`} className="flex cursor-pointer list-none items-center gap-1 rounded-full bg-white/70 px-3 py-1">
+        提醒
         {notifications.length > 0 ? <span className="h-2 w-2 rounded-full bg-[var(--rose)]" /> : null}
       </summary>
       <div className="absolute right-0 z-40 mt-2 w-72 rounded-[1.5rem] border border-[rgb(71_56_45_/_14%)] bg-[var(--paper)] p-3 shadow-xl">
@@ -23,6 +23,9 @@ export async function NotificationBell() {
             <Link href={notification.href} className="block">
               <p className="text-sm font-medium">{notification.title}</p>
               <p className="mt-1 line-clamp-2 text-xs text-[var(--muted-ink)]">{notification.body}</p>
+              <time dateTime={notification.createdAt} className="mt-1 block text-[0.65rem] text-[var(--muted-ink)]">
+                {new Date(notification.createdAt).toLocaleString("zh-CN")}
+              </time>
             </Link>
             <form action={markNotificationReadForm} className="mt-2">
               <input type="hidden" name="id" value={notification.id} />

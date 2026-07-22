@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import type { JournalActionResult } from "@/features/journal/actions";
 import type { JournalReaderEntry } from "@/features/journal/reader-data";
 import { useDeadlineActive } from "@/features/journal/components/useDeadlineActive";
+import { Comments } from "@/features/interactions/components/Comments";
+import { InlineAnnotationMenu } from "@/features/interactions/components/InlineAnnotationMenu";
+import type { JournalInteractions } from "@/features/interactions/actions";
 
 type JournalReaderProps = {
   entry: JournalReaderEntry;
@@ -15,6 +18,7 @@ type JournalReaderProps = {
   editHref?: string;
   deleteAction?: (entryId: string) => Promise<JournalActionResult>;
   image?: ReactNode;
+  interactions?: JournalInteractions;
 };
 
 function formatDateTime(value: string) {
@@ -33,6 +37,7 @@ export function JournalReader({
   editHref,
   deleteAction,
   image,
+  interactions,
 }: JournalReaderProps) {
   const router = useRouter();
   const [message, setMessage] = useState("");
@@ -84,8 +89,14 @@ export function JournalReader({
         </div>
       </dl>
 
-      <div className="mt-6 whitespace-pre-wrap rounded-[1.5rem] bg-white/55 p-5 leading-8 text-[var(--ink)]">{entry.content}</div>
+      {interactions ? (
+        <InlineAnnotationMenu entryId={entry.id} content={entry.content} annotations={interactions.annotations} />
+      ) : (
+        <div className="mt-6 whitespace-pre-wrap rounded-[1.5rem] bg-white/55 p-5 leading-8 text-[var(--ink)]">{entry.content}</div>
+      )}
       {image ? <div className="mt-6">{image}</div> : null}
+
+      {interactions ? <Comments entryId={entry.id} comments={interactions.comments} /> : null}
 
       {canManage ? (
         <div className="mt-6 flex flex-wrap gap-3">

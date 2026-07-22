@@ -10,6 +10,7 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/features/journal/actions", () => ({ deleteTodayDiaryAction: vi.fn() }));
 vi.mock("@/features/journal/repository", () => ({ getJournalEntry: vi.fn() }));
+vi.mock("@/features/interactions/actions", () => ({ getJournalInteractions: vi.fn() }));
 vi.mock("@/features/media/actions", () => ({ getReadableImageUrl: vi.fn() }));
 vi.mock("@/lib/auth/require-user", () => ({ requireUser: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createServerSupabaseClient: vi.fn() }));
@@ -18,12 +19,14 @@ import { getJournalEntry } from "@/features/journal/repository";
 import { getReadableImageUrl } from "@/features/media/actions";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getJournalInteractions } from "@/features/interactions/actions";
 import JournalEntryPage from "./page";
 
 const mockGetJournalEntry = vi.mocked(getJournalEntry);
 const mockGetReadableImageUrl = vi.mocked(getReadableImageUrl);
 const mockRequireUser = vi.mocked(requireUser);
 const mockCreateClient = vi.mocked(createServerSupabaseClient);
+const mockGetJournalInteractions = vi.mocked(getJournalInteractions);
 
 const entry = {
   id: "33333333-3333-4333-8333-333333333333",
@@ -53,6 +56,7 @@ describe("JournalEntryPage private image read", () => {
     });
     mockCreateClient.mockResolvedValue({} as never);
     mockGetJournalEntry.mockResolvedValue(entry);
+    mockGetJournalInteractions.mockResolvedValue({ comments: [], annotations: [] });
   });
 
   afterEach(cleanup);
