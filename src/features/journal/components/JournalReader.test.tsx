@@ -16,7 +16,7 @@ const entry = {
   entryDate: "2026-07-19",
   publishedAt: "2026-07-19T10:00:00.000Z",
   updatedAt: "2026-07-19T11:00:00.000Z",
-  lockedAt: "2026-07-20T10:00:00.000Z",
+  lockedAt: "2099-07-20T10:00:00.000Z",
 };
 
 describe("JournalReader", () => {

@@ -64,6 +64,8 @@ export type JournalEntry = {
   openedAt: string | null;
 };
 
+export type FutureDiaryRecipient = { id: string; displayName: string };
+
 export async function listFutureDiaryCards(
   client: JournalClient,
   options: {
@@ -124,6 +126,48 @@ export async function listTodayDiaryEntries(client: JournalClient): Promise<Jour
 
   if (error) throw new Error("Unable to load journal entries");
   return ((data ?? []) as FullEntryRow[]).map(mapFullEntry);
+}
+
+export async function listSentFutureDiaryEntries(
+  client: JournalClient,
+  authorId: string,
+): Promise<JournalEntry[]> {
+  const { data, error } = await client
+    .from("journal_entries")
+    .select(FULL_ENTRY_FIELDS)
+    .eq("entry_type", "future")
+    .eq("author_id", authorId)
+    .order("sealed_at", { ascending: false });
+
+  if (error) throw new Error("Unable to load sent future diaries");
+  return ((data ?? []) as FullEntryRow[]).map(mapFullEntry);
+}
+
+export async function getFutureDiaryRecipient(
+  client: JournalClient,
+  options: { spaceId: string; userId: string },
+): Promise<FutureDiaryRecipient | null> {
+  const { data: membership, error: membershipError } = await client
+    .from("space_members")
+    .select("user_id")
+    .eq("space_id", options.spaceId)
+    .eq("active", true)
+    .neq("user_id", options.userId)
+    .maybeSingle();
+
+  if (membershipError) throw new Error("Unable to resolve future diary recipient");
+  if (!membership) return null;
+
+  const recipientId = (membership as { user_id: string }).user_id;
+  const { data: profile, error: profileError } = await client
+    .from("profiles")
+    .select("id, display_name")
+    .eq("id", recipientId)
+    .single();
+
+  if (profileError || !profile) throw new Error("Unable to resolve future diary recipient");
+  const row = profile as { id: string; display_name: string };
+  return { id: row.id, displayName: row.display_name };
 }
 
 function mapFullEntry(row: FullEntryRow): JournalEntry {

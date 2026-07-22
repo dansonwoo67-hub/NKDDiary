@@ -29,6 +29,12 @@ const uploadInputSchema = z.discriminatedUnion("kind", [
     ...contentFields,
     entryId: entryIdSchema,
   }).strict(),
+  z.object({
+    kind: z.literal("seal-future"),
+    ...contentFields,
+    recipientId: z.string().uuid(),
+    openAt: z.string().datetime({ offset: true }),
+  }).strict(),
 ]);
 
 async function validCompressedImage(value: FormDataEntryValue | null): Promise<boolean> {
@@ -49,9 +55,10 @@ async function validCompressedImage(value: FormDataEntryValue | null): Promise<b
     && header[11] === 0x50;
 }
 
-function revalidateJournal(entryId: string) {
+function revalidateJournal(entryId: string, includeFuture = false) {
   revalidatePath("/");
   revalidatePath("/journal");
+  if (includeFuture) revalidatePath("/journal/future");
   revalidatePath(`/journal/${entryId}`);
 }
 
@@ -62,12 +69,15 @@ export async function uploadJournalImageAction(
   const parsed = uploadInputSchema.safeParse(input);
   const image = formData.get("image");
   if (!parsed.success) return { ok: false, message: "日记内容无效。" };
+  if (parsed.data.kind === "seal-future" && new Date(parsed.data.openAt).getTime() <= Date.now()) {
+    return { ok: false, message: "请选择晚于现在的有效开启时间。" };
+  }
   if (!(await validCompressedImage(image))) return { ok: false, message: "图片格式或大小无效。" };
   const compressedImage = image as File;
 
   const { userId, spaceId } = await requireUser();
   const client = await createServerSupabaseClient();
-  const entryId = parsed.data.kind === "create-today" ? randomUUID() : parsed.data.entryId;
+  const entryId = parsed.data.kind === "update-today" ? parsed.data.entryId : randomUUID();
   const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
   let upsert = false;
   if (parsed.data.kind === "update-today") {
@@ -84,11 +94,21 @@ export async function uploadJournalImageAction(
   }
   const bucket = client.storage.from("journal-images");
   const writeDiary = () => parsed.data.kind === "create-today"
-      ? client.rpc("create_today_diary", {
+    ? client.rpc("create_today_diary", {
           p_space_id: spaceId,
           p_title: parsed.data.title,
           p_content: parsed.data.content,
           p_entry_date: parsed.data.entryDate,
+          p_image_path: imagePath,
+          p_entry_id: entryId,
+        })
+    : parsed.data.kind === "seal-future"
+      ? client.rpc("seal_future_diary", {
+          p_space_id: spaceId,
+          p_title: parsed.data.title,
+          p_content: parsed.data.content,
+          p_recipient_id: parsed.data.recipientId,
+          p_open_at: parsed.data.openAt,
           p_image_path: imagePath,
           p_entry_id: entryId,
         })
@@ -227,10 +247,14 @@ export async function uploadJournalImageAction(
         : { ok: false, message: "操作失败，请稍后再试。" };
     }
 
-    revalidateJournal(entryId);
-    return parsed.data.kind === "create-today"
-      ? { ok: true, message: "今天日记已发布。", entryId }
-      : { ok: true, message: "日记已更新。", entryId };
+    revalidateJournal(entryId, parsed.data.kind === "seal-future");
+    if (parsed.data.kind === "create-today") {
+      return { ok: true, message: "今天日记已发布。", entryId };
+    }
+    if (parsed.data.kind === "seal-future") {
+      return { ok: true, message: "未来日记已封存。", entryId };
+    }
+    return { ok: true, message: "日记已更新。", entryId };
   } catch {
     const cleanup = await cleanupJournalImage(client, {
       spaceId,

@@ -85,6 +85,30 @@ describe("journal image server actions", () => {
     expect(JSON.stringify(result)).not.toContain(rpcArgs.p_image_path);
   });
 
+  it("seals a future diary image through the same server-derived path orchestration", async () => {
+    const client = installClient();
+    const recipientId = "33333333-3333-4333-8333-333333333333";
+
+    const result = await uploadJournalImageAction({
+      kind: "seal-future",
+      title: "写给以后",
+      content: "到那天再读。",
+      recipientId,
+      openAt: "2099-08-01T12:30:00.000Z",
+    }, imageForm());
+
+    expect(result).toEqual({ ok: true, message: "未来日记已封存。", entryId: expect.any(String) });
+    const rpcArgs = client.rpc.mock.calls[0][1] as Record<string, string>;
+    expect(client.rpc).toHaveBeenCalledWith("seal_future_diary", expect.objectContaining({
+      p_space_id: spaceId,
+      p_recipient_id: recipientId,
+      p_open_at: "2099-08-01T12:30:00.000Z",
+      p_entry_id: expect.any(String),
+    }));
+    expect(rpcArgs.p_image_path).toBe(`${spaceId}/${userId}/${rpcArgs.p_entry_id}.webp`);
+    expect(JSON.stringify(result)).not.toContain(rpcArgs.p_image_path);
+  });
+
   it("removes an uploaded object when the diary database write fails", async () => {
     const client = installClient({ data: null, error: { code: "42501" } });
 

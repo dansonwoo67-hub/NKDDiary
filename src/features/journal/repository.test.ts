@@ -5,6 +5,8 @@ import {
   getJournalEntry,
   listTodayDiaryEntries,
   listFutureDiaryCards,
+  listSentFutureDiaryEntries,
+  getFutureDiaryRecipient,
 } from "./repository";
 
 describe("journal repository", () => {
@@ -74,6 +76,43 @@ describe("journal repository", () => {
     expect(select).toHaveBeenCalledWith(FULL_ENTRY_FIELDS);
     expect(eq).toHaveBeenCalledWith("entry_type", "today");
     expect(order).toHaveBeenCalledWith("published_at", { ascending: false });
+  });
+
+  it("loads sent future diaries through the author-authorized full projection", async () => {
+    const order = vi.fn().mockResolvedValue({ data: [], error: null });
+    const eqAuthor = vi.fn().mockReturnValue({ order });
+    const eqType = vi.fn().mockReturnValue({ eq: eqAuthor });
+    const select = vi.fn().mockReturnValue({ eq: eqType });
+    const from = vi.fn().mockReturnValue({ select });
+    const rpc = vi.fn(() => { throw new Error("sent full content must not widen the metadata RPC"); });
+
+    await expect(listSentFutureDiaryEntries({ from, rpc } as never, "author-1")).resolves.toEqual([]);
+    expect(select).toHaveBeenCalledWith(FULL_ENTRY_FIELDS);
+    expect(eqType).toHaveBeenCalledWith("entry_type", "future");
+    expect(eqAuthor).toHaveBeenCalledWith("author_id", "author-1");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("resolves the other active member as the future diary recipient", async () => {
+    const membershipMaybeSingle = vi.fn().mockResolvedValue({ data: { user_id: "partner-1" }, error: null });
+    const neq = vi.fn().mockReturnValue({ maybeSingle: membershipMaybeSingle });
+    const eqActive = vi.fn().mockReturnValue({ neq });
+    const eqSpace = vi.fn().mockReturnValue({ eq: eqActive });
+    const membershipSelect = vi.fn().mockReturnValue({ eq: eqSpace });
+    const profileSingle = vi.fn().mockResolvedValue({ data: { id: "partner-1", display_name: "小楠" }, error: null });
+    const eqProfile = vi.fn().mockReturnValue({ single: profileSingle });
+    const profileSelect = vi.fn().mockReturnValue({ eq: eqProfile });
+    const from = vi.fn((table: string) => table === "space_members"
+      ? { select: membershipSelect }
+      : { select: profileSelect });
+
+    await expect(getFutureDiaryRecipient({ from } as never, {
+      spaceId: "space-1",
+      userId: "author-1",
+    })).resolves.toEqual({ id: "partner-1", displayName: "小楠" });
+    expect(eqSpace).toHaveBeenCalledWith("space_id", "space-1");
+    expect(eqActive).toHaveBeenCalledWith("active", true);
+    expect(neq).toHaveBeenCalledWith("user_id", "author-1");
   });
 
   it("maps a visible full journal row without creating a signed image URL", async () => {

@@ -86,6 +86,34 @@ describe("journal server actions", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
+  it("rejects a non-future opening time on the server", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-01T12:00:00Z"));
+    const { rpc } = installClient();
+
+    await expect(sealFutureDiaryAction({
+      title: "For later",
+      content: "Open this together",
+      recipientId: "33333333-3333-4333-8333-333333333333",
+      openAt: "2026-08-01T12:00:00Z",
+    })).resolves.toEqual({ ok: false, message: "请选择晚于现在的有效开启时间。" });
+    expect(mockRequireUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("rejects an impossible calendar opening time on the server", async () => {
+    const { rpc } = installClient();
+    await expect(sealFutureDiaryAction({
+      title: "For later",
+      content: "Open this together",
+      recipientId: "33333333-3333-4333-8333-333333333333",
+      openAt: "2099-02-30T12:00:00Z",
+    })).resolves.toEqual({ ok: false, message: "未来日记内容无效。" });
+    expect(mockRequireUser).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("maps the future quota unique violation without leaking database details", async () => {
     installClient({
       data: null,

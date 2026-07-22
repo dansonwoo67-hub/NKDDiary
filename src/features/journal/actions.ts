@@ -98,6 +98,9 @@ export async function createTodayDiaryAction(input: unknown): Promise<JournalAct
 export async function sealFutureDiaryAction(input: unknown): Promise<JournalActionResult> {
   const parsed = futureDiarySchema.safeParse(input);
   if (!parsed.success) return { ok: false, message: "未来日记内容无效。" };
+  if (new Date(parsed.data.openAt).getTime() <= Date.now()) {
+    return { ok: false, message: "请选择晚于现在的有效开启时间。" };
+  }
 
   const { spaceId } = await requireUser();
   const client = await createServerSupabaseClient();
