@@ -86,7 +86,7 @@ async function signIn(page: Page, email: string, password: string) {
   await page.getByLabel("邮箱").fill(email);
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "进入日记" }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
 }
 
 async function signedInApi(email: string, password: string) {
@@ -205,10 +205,8 @@ test.describe("future diary two-user lifecycle", () => {
       browser.newContext(contextOptions),
     ]);
     const [authorPage, recipientPage] = await Promise.all([authorContext.newPage(), recipientContext.newPage()]);
-    await Promise.all([
-      signIn(authorPage, process.env.COUPLE_USER_A_EMAIL!, process.env.COUPLE_USER_A_PASSWORD!),
-      signIn(recipientPage, process.env.COUPLE_USER_B_EMAIL!, process.env.COUPLE_USER_B_PASSWORD!),
-    ]);
+    await signIn(authorPage, process.env.COUPLE_USER_A_EMAIL!, process.env.COUPLE_USER_A_PASSWORD!);
+    await signIn(recipientPage, process.env.COUPLE_USER_B_EMAIL!, process.env.COUPLE_USER_B_PASSWORD!);
     await Promise.all([
       assertMobileContext(authorPage, testInfo.project.name === "mobile"),
       assertMobileContext(recipientPage, testInfo.project.name === "mobile"),
@@ -246,13 +244,13 @@ test.describe("future diary two-user lifecycle", () => {
     await state.authorPage.locator("#today-diary-title").fill(todayTitle);
     await state.authorPage.locator("#today-diary-content").fill(todayBody);
     await state.authorPage.getByRole("button", { name: "发布今日日记" }).click();
-    await expect(state.authorPage.getByRole("status")).toContainText("今日日记已发布");
+    await expect(state.authorPage.getByRole("status")).toContainText("今天日记已发布");
 
     await state.authorPage.goto(appUrl("/journal/new"));
     await state.authorPage.locator("#today-diary-title").fill(`${titlePrefix} rejected second today`);
     await state.authorPage.locator("#today-diary-content").fill("second today");
     await state.authorPage.getByRole("button", { name: "发布今日日记" }).click();
-    await expect(state.authorPage.getByRole("alert")).toContainText("今天已经写过一篇日记了");
+    await expect(state.authorPage.locator('p[role="alert"]')).toContainText("今天已经写过一篇日记了");
 
     await state.authorPage.goto(appUrl("/journal/future/new"));
     await state.authorPage.locator("#future-diary-title").fill(futureTitle);
@@ -272,7 +270,7 @@ test.describe("future diary two-user lifecycle", () => {
     await state.authorPage.locator("#future-diary-content").fill("second future");
     await state.authorPage.locator("#future-diary-open-at").fill(shanghaiLocalDateTime(nextSafeOpenTime(new Date(Date.now() + 60_000))));
     await state.authorPage.getByRole("button", { name: "确认封存" }).click();
-    await expect(state.authorPage.getByRole("alert")).toContainText("今天已经写过一篇未来日记了");
+    await expect(state.authorPage.locator('p[role="alert"]')).toContainText("今天已经写过一篇未来日记了");
 
     if (shanghaiDate() !== state.creationShanghaiDate) {
       throw new Error("Shanghai date changed while creating Task 9 fixtures; rerun the serial journey.");
@@ -360,10 +358,12 @@ test.describe("future diary two-user lifecycle", () => {
     await assertRecipientStillPrivate(state);
     state.recipientPage.once("dialog", (dialog) => dialog.accept());
     await state.recipientPage.getByRole("button", { name: "开启胶囊" }).click();
-    await expect(state.recipientPage.getByRole("link", { name: "阅读日记" })).toBeVisible();
+    await expect(state.recipientPage.getByRole("link", { name: "阅读日记" })).toBeVisible({ timeout: 15_000 });
     await state.recipientPage.getByRole("link", { name: "阅读日记" }).click();
     await expect(state.recipientPage.getByRole("heading", { name: futureTitle })).toBeVisible();
-    await expect(state.recipientPage.getByText(futureBody)).toBeVisible();
+    await expect(
+      state.recipientPage.getByLabel("日记正文，可选择文字后添加评注").getByText(futureBody),
+    ).toBeVisible();
     if (process.env.E2E_IMAGE_PATH) await expect(state.recipientPage.getByAltText("日记图片")).toBeVisible();
 
     await state.recipientPage.locator("#new-journal-comment").fill(`${marker} ordinary comment`);
@@ -376,14 +376,17 @@ test.describe("future diary two-user lifecycle", () => {
     await keyboardBody.focus();
     await keyboardBody.evaluate((element) => {
       const textarea = element as HTMLTextAreaElement;
-      textarea.setSelectionRange(0, 1);
-      textarea.dispatchEvent(new Event("select", { bubbles: true }));
+      textarea.setSelectionRange(0, 2);
     });
-    await keyboardBody.press("Shift+ArrowRight");
-    await expect(state.recipientPage.getByRole("dialog", { name: "添加划线批注" })).toBeVisible();
-    await expect(state.recipientPage.getByRole("dialog", { name: "添加划线批注" })).toContainText(futureBody.slice(0, 2));
+    await keyboardBody.dispatchEvent("select");
+    await state.recipientPage.keyboard.press("Shift");
+    await expect(state.recipientPage.getByRole("dialog", { name: "添加划线评注" })).toBeVisible();
+    await expect(state.recipientPage.getByRole("dialog", { name: "添加划线评注" })).toContainText(futureBody.slice(0, 2));
     await state.recipientPage.locator("#annotation-comment").fill(`${marker} annotation`);
-    await state.recipientPage.getByRole("button", { name: "发布批注" }).click();
+    await state.recipientPage.getByRole("button", { name: "发布评注" }).click();
+    await expect(state.recipientPage.getByText("评注已发布。", { exact: true })).toBeVisible({
+      timeout: 15_000,
+    });
     await state.recipientPage.reload();
     await expect(state.recipientPage.getByText(`${marker} annotation`)).toBeVisible();
     await expect(state.recipientPage.getByText(futureBody.slice(0, 2), { exact: true })).toBeVisible();

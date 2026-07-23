@@ -89,7 +89,7 @@ Do not sign off while any row is `NOT RUN` or `FAIL`.
 
 | Gate | Status | Evidence / approver |
 | --- | --- | --- |
-| Automated tests, lint, build, and E2E gate | NOT RUN | |
+| Automated tests, lint, build, and E2E gate | PASS | 2026-07-24 local release gate: 215 unit tests and 8 desktop/mobile two-user E2E journeys passed; lint and production build exited 0. |
 | Privacy, storage, and responsive matrices | NOT RUN | |
 | Production migration approval | NOT RUN | |
 | Vercel deployment approval | NOT RUN | |

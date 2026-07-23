@@ -58,6 +58,7 @@ supabase/migrations/202607190001_rebuild_core.sql
 supabase/migrations/202607190002_journal_functions.sql
 supabase/migrations/202607190003_interactions_and_storage.sql
 supabase/migrations/202607190004_product_integration.sql
+supabase/migrations/202607230001_fix_open_future_diary.sql
 ```
 
 Apply one file at a time. For each, append the filename, SHA-256 from

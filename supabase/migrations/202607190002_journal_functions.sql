@@ -99,8 +99,8 @@ begin
   select journal.space_id, journal.recipient_id, journal.open_at
   into v_space_id, v_recipient_id, v_open_at
   from public.journal_entries as journal
-  where id = p_entry_id
-    and entry_type = 'future'
+    where journal.id = p_entry_id
+      and journal.entry_type = 'future'
   for update;
 
   if not found then
