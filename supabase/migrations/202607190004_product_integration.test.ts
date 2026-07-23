@@ -35,4 +35,15 @@ describe("product integration migration", () => {
     expect(sql).toMatch(/not public\.calendar_event_occurs_on\(v_event\.event_date, v_event\.recurrence, v_today\)/i);
     expect(sql).toMatch(/create_legacy_notification_task7/i);
   });
+
+  it("serializes one event occurrence after due validation and before duplicate checks", () => {
+    const dueCheck = sql.indexOf("if not public.calendar_event_occurs_on(v_event.event_date, v_event.recurrence, v_today)");
+    const lock = sql.indexOf("pg_catalog.pg_advisory_xact_lock");
+    const duplicateCheck = sql.indexOf("if not exists (", lock);
+    expect(dueCheck).toBeGreaterThan(-1);
+    expect(lock).toBeGreaterThan(dueCheck);
+    expect(duplicateCheck).toBeGreaterThan(lock);
+    expect(sql.slice(lock, duplicateCheck)).toMatch(/v_event\.id::text \|\| ':' \|\| v_today::text/i);
+    expect(sql).toMatch(/notification\.created_at at time zone 'Asia\/Shanghai'\)::date = v_today/i);
+  });
 });

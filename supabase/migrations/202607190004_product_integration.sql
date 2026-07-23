@@ -233,6 +233,9 @@ begin
   if not public.calendar_event_occurs_on(v_event.event_date, v_event.recurrence, v_today) then
     raise exception 'calendar event is not due today' using errcode = '22023';
   end if;
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_event.id::text || ':' || v_today::text, 0)
+  );
 
   for v_recipient_id in
     select member.user_id from public.space_members as member
