@@ -96,3 +96,26 @@ export async function fetchExpectedLoginReadiness(
 export function hasChildExited(child: { exitCode: number | null; signalCode: string | null }) {
   return child.exitCode !== null || child.signalCode !== null;
 }
+
+export type TerminationPlan =
+  | { kind: "none" }
+  | { kind: "unix-group"; pid: number; signal: "SIGTERM" | "SIGKILL"; timeoutMs: number }
+  | { kind: "windows-taskkill"; args: string[]; timeoutMs: number };
+
+export function planTreeTermination(
+  platform: NodeJS.Platform,
+  pid: number | undefined,
+  force: boolean,
+  alreadyExited: boolean,
+): TerminationPlan {
+  if (!pid || alreadyExited) return { kind: "none" };
+  const timeoutMs = 5_000;
+  if (platform !== "win32") {
+    return { kind: "unix-group", pid: -pid, signal: force ? "SIGKILL" : "SIGTERM", timeoutMs };
+  }
+  return {
+    kind: "windows-taskkill",
+    args: ["/pid", String(pid), "/T", ...(force ? ["/F"] : [])],
+    timeoutMs,
+  };
+}

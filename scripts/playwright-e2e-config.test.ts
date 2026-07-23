@@ -6,6 +6,7 @@ import {
   integrationEnvironmentMissing,
   isExpectedLoginReadiness,
   parseEnvFile,
+  planTreeTermination,
 } from "./playwright-e2e-config";
 
 describe("Playwright E2E environment", () => {
@@ -69,5 +70,34 @@ describe("Playwright E2E environment", () => {
     await expect(fetchExpectedLoginReadiness(fetcher, "http://example.test/login", 10)).rejects.toMatchObject({
       name: "AbortError",
     });
+  });
+
+  it("plans bounded Unix process-group gentle and forced termination", () => {
+    expect(planTreeTermination("linux", 123, false, false)).toEqual({
+      kind: "unix-group",
+      pid: -123,
+      signal: "SIGTERM",
+      timeoutMs: 5_000,
+    });
+    expect(planTreeTermination("darwin", 123, true, false)).toEqual({
+      kind: "unix-group",
+      pid: -123,
+      signal: "SIGKILL",
+      timeoutMs: 5_000,
+    });
+  });
+
+  it("plans bounded Windows taskkill phases and skips already-exited children", () => {
+    expect(planTreeTermination("win32", 456, false, false)).toEqual({
+      kind: "windows-taskkill",
+      args: ["/pid", "456", "/T"],
+      timeoutMs: 5_000,
+    });
+    expect(planTreeTermination("win32", 456, true, false)).toEqual({
+      kind: "windows-taskkill",
+      args: ["/pid", "456", "/T", "/F"],
+      timeoutMs: 5_000,
+    });
+    expect(planTreeTermination("win32", 456, false, true)).toEqual({ kind: "none" });
   });
 });

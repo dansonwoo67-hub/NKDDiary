@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { createRequire } from "node:module";
 import process from "node:process";
@@ -7,6 +7,7 @@ import {
   hasChildExited,
   integrationEnvironmentMissing,
   loadLocalEnv,
+  planTreeTermination,
 } from "./playwright-e2e-config";
 
 const require = createRequire(import.meta.url);
@@ -23,6 +24,7 @@ let server: TrackedChild | undefined;
 let playwright: TrackedChild | undefined;
 let serverFailure: Error | undefined;
 let stopping: Promise<void> | undefined;
+let requestedSignalExitCode: 130 | 143 | undefined;
 
 async function findAvailablePort(preferredPort = process.env.PLAYWRIGHT_E2E_PORT) {
   const port = preferredPort ? Number(preferredPort) : 0;
@@ -81,6 +83,7 @@ async function runPlaywright(baseUrl: string, smokeOnly = false) {
       PLAYWRIGHT_BASE_URL: baseUrl,
     },
     stdio: "inherit",
+    detached: process.platform !== "win32",
   }));
   const outcome = await playwright.exited;
   return outcome.error ? 1 : outcome.code ?? 1;
@@ -94,6 +97,7 @@ function startServer(port: number) {
       NEXT_TELEMETRY_DISABLED: "1",
     },
     stdio: "inherit",
+    detached: process.platform !== "win32",
   });
   server = trackChild(child);
   void server.exited.then((outcome) => {
@@ -109,20 +113,45 @@ async function waitBounded<T>(promise: Promise<T>, timeoutMs = 5_000) {
   return Promise.race([promise.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs))]);
 }
 
-function terminateTree(tracked: TrackedChild | undefined, force = false) {
-  if (!tracked || hasChildExited(tracked.child)) return;
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(tracked.child.pid), "/T", "/F"], { stdio: "ignore" });
+async function runTaskkill(args: string[], timeoutMs: number) {
+  await new Promise<void>((resolve) => {
+    const command = spawn("taskkill", args, { stdio: "ignore", windowsHide: true });
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      try { command.kill(); } catch { /* bounded best effort */ }
+      finish();
+    }, timeoutMs);
+    command.once("error", finish);
+    command.once("exit", finish);
+  });
+}
+
+async function executeTermination(plan: ReturnType<typeof planTreeTermination>) {
+  if (plan.kind === "none") return;
+  if (plan.kind === "windows-taskkill") {
+    await runTaskkill(plan.args, plan.timeoutMs);
     return;
   }
-  tracked.child.kill(force ? "SIGKILL" : "SIGTERM");
+  try {
+    process.kill(plan.pid, plan.signal);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+      // The bounded wait below determines whether a surviving child needs forcing.
+    }
+  }
 }
 
 async function terminateChild(tracked: TrackedChild | undefined) {
   if (!tracked || hasChildExited(tracked.child)) return;
-  terminateTree(tracked);
+  await executeTermination(planTreeTermination(process.platform, tracked.child.pid, false, hasChildExited(tracked.child)));
   if (await waitBounded(tracked.exited)) return;
-  if (!hasChildExited(tracked.child)) terminateTree(tracked, true);
+  await executeTermination(planTreeTermination(process.platform, tracked.child.pid, true, hasChildExited(tracked.child)));
   await waitBounded(tracked.exited);
 }
 
@@ -155,15 +184,15 @@ async function main() {
     await stopProcesses();
   }
 
-  process.exit(exitCode);
+  process.exit(requestedSignalExitCode ?? exitCode);
 }
 
-process.on("SIGINT", () => {
-  void stopProcesses().finally(() => process.exit(130));
-});
+function requestSignalExit(code: 130 | 143) {
+  requestedSignalExitCode ??= code;
+  void stopProcesses().finally(() => process.exit(requestedSignalExitCode ?? code));
+}
 
-process.on("SIGTERM", () => {
-  void stopProcesses().finally(() => process.exit(143));
-});
+process.on("SIGINT", () => requestSignalExit(130));
+process.on("SIGTERM", () => requestSignalExit(143));
 
 void main();
