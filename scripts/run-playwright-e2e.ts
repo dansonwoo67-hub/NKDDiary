@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import process from "node:process";
+import { integrationEnvironmentMissing, loadLocalEnv } from "./playwright-e2e-config";
 
 const require = createRequire(import.meta.url);
 const nextCli = require.resolve("next/dist/bin/next");
@@ -10,13 +11,7 @@ const host = "127.0.0.1";
 const port = process.env.PORT ?? "3000";
 const baseUrl = `http://${host}:${port}`;
 
-const server = spawn(process.execPath, [nextCli, "dev", "--hostname", host, "--port", port], {
-  env: {
-    ...process.env,
-    NEXT_TELEMETRY_DISABLED: "1",
-  },
-  stdio: "inherit",
-});
+let server: ReturnType<typeof spawn> | undefined;
 
 let isStopping = false;
 
@@ -43,9 +38,11 @@ async function waitForServer(timeoutMs = 60_000) {
   throw lastError instanceof Error ? lastError : new Error("Dev server did not become ready.");
 }
 
-function runPlaywright() {
+function runPlaywright(smokeOnly = false) {
   return new Promise<number>((resolve) => {
-    const tests = spawn(process.execPath, [playwrightCli, "test"], {
+    const args = [playwrightCli, "test"];
+    if (smokeOnly) args.push("--grep", "unauthenticated smoke");
+    const tests = spawn(process.execPath, args, {
       env: {
         ...process.env,
         PLAYWRIGHT_BASE_URL: baseUrl,
@@ -58,11 +55,21 @@ function runPlaywright() {
   });
 }
 
+function startServer() {
+  server = spawn(process.execPath, [nextCli, "dev", "--hostname", host, "--port", port], {
+    env: {
+      ...process.env,
+      NEXT_TELEMETRY_DISABLED: "1",
+    },
+    stdio: "inherit",
+  });
+}
+
 function stopServer() {
   if (isStopping) return;
   isStopping = true;
 
-  if (!server.pid) return;
+  if (!server?.pid) return;
 
   if (process.platform === "win32") {
     spawnSync("taskkill", ["/pid", String(server.pid), "/T", "/F"], { stdio: "ignore" });
@@ -74,10 +81,22 @@ function stopServer() {
 
 async function main() {
   let exitCode = 1;
+  loadLocalEnv();
+  const missingIntegrationEnvironment = integrationEnvironmentMissing();
 
   try {
+    startServer();
     await waitForServer();
-    exitCode = await runPlaywright();
+    if (missingIntegrationEnvironment.length) {
+      const smokeExitCode = await runPlaywright(true);
+      console.error(
+        `Task 9 integration journeys are unavailable: missing ${missingIntegrationEnvironment.join(", ")}. `
+        + "Smoke ran separately; this full gate is intentionally failing rather than skipping privacy/quota evidence.",
+      );
+      exitCode = smokeExitCode === 0 ? 1 : smokeExitCode;
+    } else {
+      exitCode = await runPlaywright();
+    }
   } finally {
     stopServer();
   }
