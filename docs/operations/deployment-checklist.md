@@ -59,6 +59,7 @@ supabase/migrations/202607190002_journal_functions.sql
 supabase/migrations/202607190003_interactions_and_storage.sql
 supabase/migrations/202607190004_product_integration.sql
 supabase/migrations/202607230001_fix_open_future_diary.sql
+supabase/migrations/202607230002_restore_future_diary_open_notification.sql
 ```
 
 Apply one file at a time. For each, append the filename, SHA-256 from

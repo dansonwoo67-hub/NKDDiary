@@ -43,11 +43,15 @@ describe("journal lifecycle migration contract", () => {
   it("locks opening and records it idempotently using database time", () => {
     const migration = readMigration();
 
-    expect(migration).toMatch(/from public\.journal_entries[\s\S]*where id = p_entry_id[\s\S]*for update/);
+    expect(migration).toMatch(/from public\.journal_entries as journal[\s\S]*where journal\.id = p_entry_id[\s\S]*journal\.entry_type = 'future'[\s\S]*for update/);
     expect(migration).toContain("v_recipient_id <> auth.uid()");
     expect(migration).toContain("v_now < v_open_at");
-    expect(migration).toContain("opened_at = coalesce(opened_at, now())");
-    expect(migration).toContain("opened_by = coalesce(opened_by, auth.uid())");
+    expect(migration).toContain(
+      "opened_at = coalesce(public.journal_entries.opened_at, now())",
+    );
+    expect(migration).toContain(
+      "opened_by = coalesce(public.journal_entries.opened_by, auth.uid())",
+    );
   });
 
   it.each(["open_future_diary", "update_today_diary", "delete_today_diary"])(

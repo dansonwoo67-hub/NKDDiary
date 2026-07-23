@@ -117,8 +117,8 @@ begin
 
   return query
   update public.journal_entries
-  set opened_at = coalesce(opened_at, now()),
-      opened_by = coalesce(opened_by, auth.uid())
+  set opened_at = coalesce(public.journal_entries.opened_at, now()),
+      opened_by = coalesce(public.journal_entries.opened_by, auth.uid())
   where public.journal_entries.id = p_entry_id
   returning public.journal_entries.id,
             public.journal_entries.opened_at,
