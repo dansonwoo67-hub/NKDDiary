@@ -45,7 +45,7 @@ diaries remain non-interactive for both author and recipient.
 
 - Focused interaction/reader/notification/migration suite: PASS (41 tests at
   the initial combined gate; expanded contracts included in the full suite).
-- Full `npm test`: PASS — 30 files, 168 tests.
+- Full `npm test`: PASS — 30 files, 175 tests after independent-review fixes.
 - `npm run lint`: PASS — no errors or warnings.
 - `npm run build`: PASS.
 - `git diff --check`: PASS.
@@ -57,3 +57,27 @@ diaries remain non-interactive for both author and recipient.
 - Next.js reports the repository's pre-existing multiple-lockfile workspace-root
   warning during build; compilation, type checking, and page generation all
   succeed.
+
+## Independent review remediation
+
+Follow-up hardening completed after the first Task 7 review:
+
+- Removed the legacy authenticated notification INSERT policy and table grant
+  before introducing the future-open enum value. Existing annotation, reply,
+  letter-open, and calendar notifications now call one security-definer RPC
+  that derives recipient, type, source, title, and body from validated database
+  rows; callers cannot provide notification content or recipient IDs.
+- Added a database-owned `future_diary_opened` discriminator whose CHECK
+  constraint is equivalent to the notification enum type. The partial unique
+  index is now strictly `(recipient_id, type, source_id)` for that type and no
+  longer depends on title text. The open RPC always sets the discriminator.
+- Added authoritative database comment enforcement. A documented PostgreSQL
+  grapheme counter handles combining marks, variation selectors, emoji skin
+  tones, regional-indicator pairs, tag characters, CRLF, and ZWJ sequences;
+  both the table CHECK and create/update RPCs enforce at most 200. Therefore a
+  direct RPC call with 201 ASCII characters is rejected independently of the
+  Next.js action.
+- Added two-way cross-block tests, a focusable/labelled body block, an explicit
+  keyboard action, dialog focus transfer, document `selectionchange` fallback,
+  outside-selection filtering, and verification that native selection events
+  are not cancelled.

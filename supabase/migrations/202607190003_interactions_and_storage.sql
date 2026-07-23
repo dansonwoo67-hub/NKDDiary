@@ -489,14 +489,86 @@ to authenticated;
 -- policies intact under an explicit name before adding journal interactions.
 alter table public.annotation_replies rename to letter_annotation_replies;
 
+drop policy if exists "couple members can create notifications"
+on public.notifications;
+revoke insert on table public.notifications from public, anon, authenticated;
+
 alter type public.notification_type add value if not exists 'future_diary_opened';
+
+alter table public.notifications
+add column future_diary_opened boolean not null default false;
+alter table public.notifications
+add constraint notifications_future_diary_opened_type_check
+check (future_diary_opened = (type::text = 'future_diary_opened'));
+
+create or replace function public.journal_visible_grapheme_count(value text)
+returns integer
+language plpgsql
+immutable
+strict
+set search_path = pg_catalog
+as $$
+declare
+  v_position integer := 1;
+  v_length integer := char_length(value);
+  v_count integer := 0;
+  v_codepoint integer;
+  v_previous_was_zwj boolean := false;
+  v_regional_run integer := 0;
+begin
+  while v_position <= v_length loop
+    v_codepoint := ascii(substring(value from v_position for 1));
+
+    if v_codepoint = 13
+      and v_position < v_length
+      and ascii(substring(value from v_position + 1 for 1)) = 10
+    then
+      v_count := v_count + 1;
+      v_position := v_position + 2;
+      v_previous_was_zwj := false;
+      v_regional_run := 0;
+      continue;
+    end if;
+
+    if v_codepoint = 8205 then
+      v_previous_was_zwj := true;
+    elsif v_previous_was_zwj then
+      v_previous_was_zwj := false;
+    elsif v_codepoint between 768 and 879
+      or v_codepoint between 6832 and 6911
+      or v_codepoint between 7616 and 7679
+      or v_codepoint between 8400 and 8447
+      or v_codepoint between 65024 and 65039
+      or v_codepoint between 65056 and 65071
+      or v_codepoint between 127995 and 127999
+      or v_codepoint between 917536 and 917631
+    then
+      null;
+    elsif v_codepoint between 127462 and 127487 then
+      if v_regional_run % 2 = 0 then
+        v_count := v_count + 1;
+      end if;
+      v_regional_run := v_regional_run + 1;
+    else
+      v_count := v_count + 1;
+      v_regional_run := 0;
+    end if;
+
+    v_position := v_position + 1;
+  end loop;
+  return v_count;
+end;
+$$;
 
 create table public.journal_comments (
   id uuid primary key default gen_random_uuid(),
   space_id uuid not null references public.spaces(id) on delete restrict,
   entry_id uuid not null references public.journal_entries(id) on delete cascade,
   author_id uuid not null references public.profiles(id) on delete restrict,
-  body text not null check (char_length(btrim(body)) between 1 and 20000),
+  body text not null check (
+    char_length(btrim(body)) between 1 and 20000
+    and public.journal_visible_grapheme_count(btrim(body)) <= 200
+  ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -535,7 +607,7 @@ on public.annotation_replies(annotation_id, created_at, id);
 
 create unique index notifications_recipient_type_source_key
 on public.notifications(recipient_id, type, source_id)
-where title = '未来日记已被开启';
+where future_diary_opened;
 
 create or replace function public.can_interact_with_journal(
   requested_entry_id uuid
@@ -686,7 +758,9 @@ begin
   if not found then
     raise exception 'journal entry not found' using errcode = 'P0002';
   end if;
-  if char_length(btrim(p_body)) not between 1 and 20000 then
+  if char_length(btrim(p_body)) not between 1 and 20000
+    or public.journal_visible_grapheme_count(btrim(p_body)) > 200
+  then
     raise exception 'invalid comment' using errcode = '22023';
   end if;
 
@@ -715,7 +789,9 @@ begin
   if not found or not public.can_interact_with_journal(v_comment.entry_id) then
     raise exception 'comment not found or immutable' using errcode = 'P0002';
   end if;
-  if char_length(btrim(p_body)) not between 1 and 20000 then
+  if char_length(btrim(p_body)) not between 1 and 20000
+    or public.journal_visible_grapheme_count(btrim(p_body)) > 200
+  then
     raise exception 'invalid comment' using errcode = '22023';
   end if;
   update public.journal_comments set body = btrim(p_body)
@@ -916,6 +992,113 @@ begin
 end;
 $$;
 
+create or replace function public.create_legacy_notification(
+  p_kind text,
+  p_source_id uuid
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_actor_name text;
+  v_recipient_id uuid;
+  v_notification_source_id uuid;
+  v_title text;
+  v_body text;
+  v_event record;
+  v_profile record;
+begin
+  if v_actor_id is null or not exists (
+    select 1 from public.space_members as member
+    where member.user_id = v_actor_id and member.active
+  ) then
+    raise exception 'active membership required' using errcode = '42501';
+  end if;
+
+  if p_kind = 'annotation' then
+    select profile.display_name, letter.author_id, annotation.letter_id,
+           annotation.quoted_text
+    into v_actor_name, v_recipient_id, v_notification_source_id, v_body
+    from public.annotations as annotation
+    join public.letters as letter on letter.id = annotation.letter_id
+    join public.profiles as profile on profile.id = annotation.author_id
+    where annotation.id = p_source_id
+      and annotation.author_id = v_actor_id;
+    v_title := v_actor_name || ' 评点了你的信';
+    v_body := left(v_body, 60);
+  elsif p_kind = 'annotation_reply' then
+    select profile.display_name,
+           case when annotation.author_id = reply.author_id
+             then letter.author_id else annotation.author_id end,
+           annotation.letter_id,
+           reply.body
+    into v_actor_name, v_recipient_id, v_notification_source_id, v_body
+    from public.letter_annotation_replies as reply
+    join public.annotations as annotation on annotation.id = reply.annotation_id
+    join public.letters as letter on letter.id = annotation.letter_id
+    join public.profiles as profile on profile.id = reply.author_id
+    where reply.id = p_source_id
+      and reply.author_id = v_actor_id;
+    v_title := v_actor_name || ' 回复了评点';
+    v_body := left(v_body, 80);
+  elsif p_kind = 'letter_opened' then
+    select profile.display_name, letter.author_id, letter.id,
+           response.response_text
+    into v_actor_name, v_recipient_id, v_notification_source_id, v_body
+    from public.letter_open_responses as response
+    join public.letters as letter on letter.id = response.letter_id
+    join public.profiles as profile on profile.id = response.reader_id
+    where response.letter_id = p_source_id
+      and response.reader_id = v_actor_id;
+    v_title := v_actor_name || ' 展开了你的信';
+    v_body := '回应：' || v_body;
+  elsif p_kind = 'calendar_event' then
+    select event.id, event.name into v_event
+    from public.calendar_events as event
+    where event.id = p_source_id;
+    if not found then
+      raise exception 'notification source not found' using errcode = 'P0002';
+    end if;
+
+    for v_profile in select profile.id from public.profiles as profile loop
+      if not exists (
+        select 1 from public.notifications as notification
+        where notification.recipient_id = v_profile.id
+          and notification.type = 'calendar_event'
+          and notification.source_id = v_event.id
+          and (notification.created_at at time zone 'Asia/Shanghai')::date =
+              (now() at time zone 'Asia/Shanghai')::date
+      ) then
+        insert into public.notifications(recipient_id, type, source_id, title, body)
+        values (v_profile.id, 'calendar_event', v_event.id, '今日提醒', v_event.name);
+      end if;
+    end loop;
+    return;
+  else
+    raise exception 'unsupported notification kind' using errcode = '22023';
+  end if;
+
+  if not found then
+    raise exception 'notification source not found' using errcode = 'P0002';
+  end if;
+  if v_recipient_id = v_actor_id then
+    return;
+  end if;
+
+  insert into public.notifications(recipient_id, type, source_id, title, body)
+  values (
+    v_recipient_id,
+    p_kind::public.notification_type,
+    v_notification_source_id,
+    v_title,
+    v_body
+  );
+end;
+$$;
+
 create or replace function public.open_future_diary(p_entry_id uuid)
 returns table (id uuid, opened_at timestamptz, opened_by uuid)
 language plpgsql
@@ -950,16 +1133,19 @@ begin
       opened_by = coalesce(public.journal_entries.opened_by, auth.uid())
   where public.journal_entries.id = p_entry_id;
 
-  insert into public.notifications(recipient_id, type, source_id, title, body)
+  insert into public.notifications(
+    recipient_id, type, source_id, title, body, future_diary_opened
+  )
   values (
     v_author_id,
     'future_diary_opened'::text::public.notification_type,
     p_entry_id,
     '未来日记已被开启',
-    '对方打开了你封存的未来日记。'
+    '对方打开了你封存的未来日记。',
+    true
   )
   on conflict (recipient_id, type, source_id)
-  where title = '未来日记已被开启'
+  where future_diary_opened
   do nothing;
 
   return query
@@ -981,6 +1167,8 @@ revoke execute on function public.delete_journal_annotation(uuid) from public, a
 revoke execute on function public.create_annotation_reply(uuid, text) from public, anon, authenticated;
 revoke execute on function public.update_annotation_reply(uuid, text) from public, anon, authenticated;
 revoke execute on function public.delete_annotation_reply(uuid) from public, anon, authenticated;
+revoke execute on function public.create_legacy_notification(text, uuid) from public, anon, authenticated;
+revoke execute on function public.journal_visible_grapheme_count(text) from public, anon, authenticated;
 
 grant execute on function public.create_journal_comment(uuid, text) to authenticated;
 grant execute on function public.can_interact_with_journal(uuid) to authenticated;
@@ -992,3 +1180,4 @@ grant execute on function public.delete_journal_annotation(uuid) to authenticate
 grant execute on function public.create_annotation_reply(uuid, text) to authenticated;
 grant execute on function public.update_annotation_reply(uuid, text) to authenticated;
 grant execute on function public.delete_annotation_reply(uuid) to authenticated;
+grant execute on function public.create_legacy_notification(text, uuid) to authenticated;

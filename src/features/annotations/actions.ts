@@ -12,7 +12,7 @@ export async function createAnnotationAction(input: {
   endOffset: number;
   comment: string;
 }): Promise<ActionResult> {
-  const { userId, profile } = await requireUser();
+  const { userId } = await requireUser();
   const supabase = await createServerSupabaseClient();
   const quotedText = input.quotedText.trim();
   const comment = input.comment.trim();
@@ -28,24 +28,25 @@ export async function createAnnotationAction(input: {
 
   if (letterError || !letter) return { ok: false, message: letterError?.message ?? "没有找到这封信。" };
 
-  const { error } = await supabase.from("annotations").insert({
-    letter_id: input.letterId,
-    author_id: userId,
-    quoted_text: quotedText,
-    start_offset: input.startOffset,
-    end_offset: input.endOffset,
-    comment,
-  });
+  const { data: annotation, error } = await supabase
+    .from("annotations")
+    .insert({
+      letter_id: input.letterId,
+      author_id: userId,
+      quoted_text: quotedText,
+      start_offset: input.startOffset,
+      end_offset: input.endOffset,
+      comment,
+    })
+    .select("id")
+    .single();
 
-  if (error) return { ok: false, message: error.message };
+  if (error || !annotation) return { ok: false, message: error?.message ?? "评点保存失败。" };
 
   if (String(letter.author_id) !== userId) {
-    await supabase.from("notifications").insert({
-      recipient_id: String(letter.author_id),
-      type: "annotation",
-      source_id: input.letterId,
-      title: `${profile.display_name} 评点了你的信`,
-      body: quotedText.slice(0, 60),
+    await supabase.rpc("create_legacy_notification", {
+      p_kind: "annotation",
+      p_source_id: String(annotation.id),
     });
   }
 
@@ -54,7 +55,7 @@ export async function createAnnotationAction(input: {
 }
 
 export async function createAnnotationReplyAction(input: { annotationId: string; body: string }): Promise<ActionResult> {
-  const { userId, profile } = await requireUser();
+  const { userId } = await requireUser();
   const supabase = await createServerSupabaseClient();
   const body = input.body.trim();
 
@@ -68,24 +69,25 @@ export async function createAnnotationReplyAction(input: { annotationId: string;
 
   if (annotationError || !annotation) return { ok: false, message: annotationError?.message ?? "没有找到这条评点。" };
 
-  const { error } = await supabase.from("letter_annotation_replies").insert({
-    annotation_id: input.annotationId,
-    author_id: userId,
-    body,
-  });
+  const { data: reply, error } = await supabase
+    .from("letter_annotation_replies")
+    .insert({
+      annotation_id: input.annotationId,
+      author_id: userId,
+      body,
+    })
+    .select("id")
+    .single();
 
-  if (error) return { ok: false, message: error.message };
+  if (error || !reply) return { ok: false, message: error?.message ?? "回复保存失败。" };
 
   const letter = Array.isArray(annotation.letters) ? annotation.letters[0] : annotation.letters;
   const recipientId = String(annotation.author_id) === userId ? String(letter?.author_id) : String(annotation.author_id);
 
   if (recipientId && recipientId !== userId) {
-    await supabase.from("notifications").insert({
-      recipient_id: recipientId,
-      type: "annotation_reply",
-      source_id: String(annotation.letter_id),
-      title: `${profile.display_name} 回复了评点`,
-      body: body.slice(0, 80),
+    await supabase.rpc("create_legacy_notification", {
+      p_kind: "annotation_reply",
+      p_source_id: String(reply.id),
     });
   }
 

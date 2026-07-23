@@ -197,7 +197,7 @@ export async function saveLetterAction(input: SaveLetterInput): Promise<ActionRe
 }
 
 export async function createOpenResponseAction(input: { letterId: string; responseText: string }): Promise<ActionResult> {
-  const { userId, profile } = await requireUser();
+  const { userId } = await requireUser();
   const supabase = await createServerSupabaseClient();
 
   let responseText: string;
@@ -243,12 +243,9 @@ export async function createOpenResponseAction(input: { letterId: string; respon
       return { ok: false, message: error.message };
     }
 
-    await supabase.from("notifications").insert({
-      recipient_id: String(letter.author_id),
-      type: "letter_opened",
-      source_id: input.letterId,
-      title: `${profile.display_name} 展开了你的信`,
-      body: `回应：${responseText}`,
+    await supabase.rpc("create_legacy_notification", {
+      p_kind: "letter_opened",
+      p_source_id: input.letterId,
     });
   }
 

@@ -11,6 +11,10 @@ function readMigration() {
   return readFileSync(migrationPath, "utf8").toLowerCase();
 }
 
+function readProjectFile(path: string) {
+  return readFileSync(resolve(process.cwd(), path), "utf8").toLowerCase();
+}
+
 describe("private journal image storage migration", () => {
   it("creates an explicitly private WebP-only bucket capped at 800 KB", () => {
     const migration = readMigration();
@@ -245,8 +249,56 @@ describe("private journal image storage migration", () => {
     expect(migration).toContain("recipient_id, type, source_id");
     expect(definition).toContain("for update");
     expect(definition).toContain("insert into public.notifications");
-    expect(definition).toMatch(/on conflict \(recipient_id, type, source_id\)\s+where title = '未来日记已被开启'\s+do nothing/);
+    expect(definition).toMatch(/on conflict \(recipient_id, type, source_id\)\s+where future_diary_opened\s+do nothing/);
     expect(definition).not.toContain("journal.title");
     expect(definition).not.toContain("journal.content");
+  });
+
+  it("revokes direct notification writes and exposes only a derived legacy notification RPC", () => {
+    const migration = readMigration();
+    expect(migration).toContain('drop policy if exists "couple members can create notifications"');
+    expect(migration).toContain("revoke insert on table public.notifications from public, anon, authenticated");
+    expect(migration.indexOf("revoke insert on table public.notifications")).toBeLessThan(
+      migration.indexOf("add value if not exists 'future_diary_opened'"),
+    );
+    expect(migration).toContain("create or replace function public.create_legacy_notification");
+    expect(migration).toContain("grant execute on function public.create_legacy_notification(text, uuid) to authenticated");
+
+    for (const path of [
+      "src/features/annotations/actions.ts",
+      "src/features/calendar/actions.ts",
+      "src/features/letters/actions.ts",
+    ]) {
+      expect(readProjectFile(path)).not.toMatch(/from\(["']notifications["']\)\.insert/);
+    }
+  });
+
+  it("deduplicates future-open notifications by recipient, type, and source without title dependence", () => {
+    const migration = readMigration();
+    const indexStart = migration.indexOf("create unique index notifications_recipient_type_source_key");
+    const indexEnd = migration.indexOf(";", indexStart);
+    const index = migration.slice(indexStart, indexEnd);
+    const openStart = migration.lastIndexOf("create or replace function public.open_future_diary");
+    const openEnd = migration.indexOf("\n$$;", openStart);
+    const open = migration.slice(openStart, openEnd);
+
+    expect(index).toContain("recipient_id, type, source_id");
+    expect(index).toContain("where future_diary_opened");
+    expect(index).not.toContain("title");
+    expect(migration).toContain("check (future_diary_opened = (type::text = 'future_diary_opened'))");
+    expect(open).toContain("future_diary_opened");
+    expect(open).toMatch(/on conflict \(recipient_id, type, source_id\)\s+where future_diary_opened\s+do nothing/);
+    expect(open).not.toMatch(/on conflict[\s\S]*where title/);
+  });
+
+  it("enforces the 200-grapheme comment limit in the database entry points", () => {
+    const migration = readMigration();
+    expect(migration).toContain("create or replace function public.journal_visible_grapheme_count");
+    expect(migration).toContain("journal_visible_grapheme_count(btrim(body)) <= 200");
+    for (const name of ["create_journal_comment", "update_journal_comment"]) {
+      const start = migration.indexOf(`create or replace function public.${name}`);
+      const end = migration.indexOf("\n$$;", start);
+      expect(migration.slice(start, end)).toContain("public.journal_visible_grapheme_count(btrim(p_body)) > 200");
+    }
   });
 });

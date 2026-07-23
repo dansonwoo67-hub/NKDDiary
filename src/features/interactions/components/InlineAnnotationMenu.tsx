@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   createAnnotationAction,
   createReplyAction,
@@ -35,6 +35,7 @@ function BodyWithHighlights({ content, annotations }: { content: string; annotat
 
 export function InlineAnnotationMenu({ entryId, content, annotations }: { entryId: string; content: string; annotations: JournalAnnotation[] }) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const annotationInputRef = useRef<HTMLTextAreaElement>(null);
   const [anchor, setAnchor] = useState<Anchor | null>(null);
   const [comment, setComment] = useState("");
   const [replyBodies, setReplyBodies] = useState<Record<string, string>>({});
@@ -47,7 +48,8 @@ export function InlineAnnotationMenu({ entryId, content, annotations }: { entryI
     if (!selection || !body || selection.isCollapsed || !selection.toString()) return;
     const anchorInside = Boolean(selection.anchorNode && body.contains(selection.anchorNode));
     const focusInside = Boolean(selection.focusNode && body.contains(selection.focusNode));
-    if (!anchorInside || !focusInside) {
+    if (!anchorInside && !focusInside) return;
+    if (anchorInside !== focusInside) {
       setAnchor(null);
       setMessage(CROSS_BLOCK_SELECTION_MESSAGE);
       return;
@@ -63,6 +65,18 @@ export function InlineAnnotationMenu({ entryId, content, annotations }: { entryI
     setAnchor({ startOffset, endOffset: startOffset + Array.from(quotedText).length, quotedText });
     setMessage("");
   }
+
+  useEffect(() => {
+    function handleSelectionChange() {
+      captureSelection();
+    }
+    document.addEventListener("selectionchange", handleSelectionChange);
+    return () => document.removeEventListener("selectionchange", handleSelectionChange);
+  });
+
+  useEffect(() => {
+    if (anchor) annotationInputRef.current?.focus();
+  }, [anchor]);
 
   function closeMenu() {
     setAnchor(null);
@@ -89,9 +103,16 @@ export function InlineAnnotationMenu({ entryId, content, annotations }: { entryI
 
   return (
     <section className="mt-6" onKeyDown={(event) => { if (event.key === "Escape") closeMenu(); }}>
+      <div className="mb-2 flex justify-end">
+        <button type="button" onClick={captureSelection} className="rounded-full bg-white/70 px-3 py-1 text-xs text-[var(--muted-ink)]">
+          评注选中文字
+        </button>
+      </div>
       <div
         ref={bodyRef}
         data-block-id="body"
+        tabIndex={0}
+        aria-label="日记正文，可选择文字后添加评注"
         onMouseUp={captureSelection}
         onPointerUp={captureSelection}
         onKeyUp={captureSelection}
@@ -104,7 +125,7 @@ export function InlineAnnotationMenu({ entryId, content, annotations }: { entryI
         <div role="dialog" aria-label="添加划线评注" className="mt-3 rounded-2xl border border-[rgb(71_56_45_/_14%)] bg-[var(--paper)] p-4 shadow-lg">
           <p className="text-sm text-[var(--muted-ink)]">“{anchor.quotedText}”</p>
           <label htmlFor="annotation-comment" className="sr-only">评注</label>
-          <textarea id="annotation-comment" value={comment} onChange={(event) => setComment(event.target.value)} rows={3} className="mt-3 w-full rounded-xl border bg-white p-3" />
+          <textarea ref={annotationInputRef} id="annotation-comment" value={comment} onChange={(event) => setComment(event.target.value)} rows={3} className="mt-3 w-full rounded-xl border bg-white p-3" />
           <div className="mt-3 flex gap-2">
             <button type="button" disabled={isPending || !comment.trim()} onClick={submitAnnotation} className="rounded-full bg-[var(--ink)] px-4 py-2 text-sm text-white disabled:opacity-50">发布评注</button>
             <button type="button" onClick={closeMenu} className="rounded-full px-4 py-2 text-sm">取消</button>

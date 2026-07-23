@@ -118,35 +118,10 @@ async function ensureTodayEventNotifications(events: Array<{ id: string; name: s
   if (events.length === 0) return;
 
   const supabase = await createServerSupabaseClient();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(todayStart);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-
-  const { data: profiles } = await supabase.from("profiles").select("id");
-
-  for (const event of events) {
-    for (const profile of profiles ?? []) {
-      const { data: existing } = await supabase
-        .from("notifications")
-        .select("id")
-        .eq("recipient_id", String(profile.id))
-        .eq("source_id", event.id)
-        .gte("created_at", todayStart.toISOString())
-        .lt("created_at", tomorrow.toISOString())
-        .maybeSingle();
-
-      if (!existing) {
-        await supabase.from("notifications").insert({
-          recipient_id: String(profile.id),
-          type: "calendar_event",
-          source_id: event.id,
-          title: "今日提醒",
-          body: event.name,
-        });
-      }
-    }
-  }
+  await Promise.all(events.map((event) => supabase.rpc("create_legacy_notification", {
+    p_kind: "calendar_event",
+    p_source_id: event.id,
+  })));
 }
 
 export async function getMonthCalendarState(year: number, month: number): Promise<MonthCalendarState> {
