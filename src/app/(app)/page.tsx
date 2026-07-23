@@ -8,14 +8,15 @@ import { listFutureDiaryCards } from "@/features/journal/repository";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getChinaDateString } from "@/lib/date/china-day";
+import { listActiveSpaceProfiles } from "@/features/profile/repository";
 
 function daysBetween(startDate: string, endDate: Date) {
   const start = new Date(`${startDate}T00:00:00+08:00`);
   return Math.max(0, Math.floor((endDate.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1);
 }
 
-function profileCoordinates(profile: { last_login_latitude: number | null; last_login_longitude: number | null }): Coordinates | null {
-  if (profile.last_login_latitude === null || profile.last_login_longitude === null) return null;
+function profileCoordinates(profile: { last_login_latitude?: number | null; last_login_longitude?: number | null }): Coordinates | null {
+  if (profile.last_login_latitude == null || profile.last_login_longitude == null) return null;
   return { latitude: profile.last_login_latitude, longitude: profile.last_login_longitude };
 }
 
@@ -26,7 +27,7 @@ function avatarPoints(distanceKm: number | null) {
 }
 
 export default async function HomePage() {
-  const { userId, profile } = await requireUser();
+  const { userId, profile, spaceId } = await requireUser();
   const supabase = await createServerSupabaseClient();
   const now = new Date();
   const [chinaYear, chinaMonth] = getChinaDateString(now).split("-").map(Number);
@@ -35,14 +36,14 @@ export default async function HomePage() {
   const [calendarState, receivedFuture, profileResult] = await Promise.all([
     getMonthCalendarState(chinaYear, chinaMonth),
     listFutureDiaryCards(supabase, { userId, box: "received", now }),
-    supabase.from("profiles").select("id, display_name, avatar_url, last_login_latitude, last_login_longitude"),
+    listActiveSpaceProfiles(supabase, spaceId),
   ]);
-  const profiles = profileResult.data;
+  const profiles = profileResult;
   const otherProfile = (profiles ?? []).find((item) => String(item.id) !== userId) ?? null;
-  const authorName = otherProfile?.display_name ? String(otherProfile.display_name) : "伴侣";
+  const authorNames = new Map((profiles ?? []).map((item) => [String(item.id), String(item.display_name)]));
   const futureStatus = selectHomepageFutureDiary(receivedFuture
     .filter((entry) => entry.state === "ready" || entry.state === "waiting")
-    .map((entry) => ({ id: entry.id, authorName, state: entry.state as "ready" | "waiting", openAt: entry.openAt })));
+    .map((entry) => ({ id: entry.id, authorName: authorNames.get(entry.authorId) ?? "伴侣", state: entry.state as "ready" | "waiting", openAt: entry.openAt })));
   const { data: latestLetterLocation } = await supabase
     .from("letters")
     .select("latitude, longitude")
@@ -84,7 +85,7 @@ export default async function HomePage() {
 
       <FutureDiaryStatusCard entry={futureStatus} />
 
-      <MonthHeatmap state={calendarState} />
+      <MonthHeatmap state={calendarState} compact={profile.display_preferences?.compactCalendar ?? false} />
     </div>
   );
 }

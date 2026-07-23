@@ -2,11 +2,13 @@ import { JournalCard } from "@/features/journal/components/JournalCard";
 import { listTodayDiaryEntries } from "@/features/journal/repository";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { listActiveSpaceProfiles } from "@/features/profile/repository";
 
-export default async function JournalPage() {
-  const [{ userId }, supabase] = await Promise.all([requireUser(), createServerSupabaseClient()]);
-  const todayEntries = await listTodayDiaryEntries(supabase);
-  const { data: profiles } = await supabase.from("profiles").select("id, display_name");
+export default async function JournalPage({ searchParams }: { searchParams: Promise<{ date?: string }> }) {
+  const [{ userId, spaceId }, supabase, params] = await Promise.all([requireUser(), createServerSupabaseClient(), searchParams]);
+  const requestedDate = /^\d{4}-\d{2}-\d{2}$/.test(params.date ?? "") ? params.date : undefined;
+  const todayEntries = (await listTodayDiaryEntries(supabase)).filter((entry) => !requestedDate || entry.entryDate === requestedDate);
+  const profiles = await listActiveSpaceProfiles(supabase, spaceId);
   const authorNames = new Map((profiles ?? []).map((item) => [String(item.id), String(item.display_name)]));
 
   return (
@@ -15,7 +17,7 @@ export default async function JournalPage() {
         <div>
           <p className="text-sm tracking-[0.25em] text-[var(--muted-ink)]">JOURNAL</p>
           <h1 id="today-diaries-heading" className="mt-2 text-3xl font-semibold text-[var(--ink)]">
-            今日日记
+            {requestedDate ? `${requestedDate} 的日记` : "今日日记"}
           </h1>
         </div>
         <JournalCard href="/journal/new" title="写一篇今日日记" description="记录此刻，发布后 24 小时内可继续编辑。" actionLabel="开始写日记" />

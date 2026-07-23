@@ -8,7 +8,7 @@ function heatClass(recordCount: number) {
   return "bg-white/55";
 }
 
-export function MonthHeatmap({ state }: { state: MonthCalendarState }) {
+export function MonthHeatmap({ state, compact = false }: { state: MonthCalendarState; compact?: boolean }) {
   return (
     <section className="hand-card rounded-[2rem] p-6">
       <div className="flex items-end justify-between">
@@ -23,12 +23,12 @@ export function MonthHeatmap({ state }: { state: MonthCalendarState }) {
         </Link>
       </div>
 
-      <div className="mt-5 grid grid-cols-7 gap-2">
+      <div data-testid="month-grid" data-density={compact ? "compact" : "comfortable"} className={`mt-5 grid grid-cols-7 ${compact ? "gap-1" : "gap-2"}`}>
         {state.days.map((day) => (
           <Link
-            href={`/letters/${day.date}`}
+            href={`/journal?date=${day.date}`}
             key={day.date}
-            className={`min-h-20 rounded-2xl p-2 transition hover:-translate-y-0.5 ${heatClass(day.recordCount)}`}
+            className={`${compact ? "min-h-12 rounded-xl p-1" : "min-h-20 rounded-2xl p-2"} transition hover:-translate-y-0.5 ${heatClass(day.recordCount)}`}
           >
             <span className="text-xs text-[var(--muted-ink)]">{day.dayOfMonth}</span>
             <div className="mt-2 flex flex-wrap gap-1">

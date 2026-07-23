@@ -20,4 +20,19 @@ describe("product integration migration", () => {
     expect(sql).toMatch(/revoke all privileges on table public\.mood_entries from anon, authenticated/i);
     expect(sql).toMatch(/revoke insert, update, delete on public\.calendar_events from authenticated/i);
   });
+
+  it("replaces the legacy profile policy with active-space-only visibility", () => {
+    expect(sql).toMatch(/drop policy if exists "couple members can read profiles"/i);
+    expect(sql).toMatch(/create or replace function public\.shares_active_space[\s\S]*security definer[\s\S]*set search_path = ''/i);
+    expect(sql).toMatch(/create policy "users can read self and active space profiles"[\s\S]*shares_active_space\(id\)/i);
+    expect(sql).toMatch(/revoke execute on function public\.shares_active_space\(uuid, uuid\) from public, anon, authenticated/i);
+  });
+
+  it("authoritatively rejects cross-space and non-due calendar reminders", () => {
+    expect(sql).toMatch(/create or replace function public\.calendar_event_occurs_on/i);
+    expect(sql).toMatch(/event\.space_id = v_space_id/i);
+    expect(sql).toMatch(/is_active_space_member\(event\.space_id, event\.creator_id\)/i);
+    expect(sql).toMatch(/not public\.calendar_event_occurs_on\(v_event\.event_date, v_event\.recurrence, v_today\)/i);
+    expect(sql).toMatch(/create_legacy_notification_task7/i);
+  });
 });

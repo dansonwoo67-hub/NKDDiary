@@ -142,3 +142,117 @@ revoke execute on function public.update_couple_preferences(text, text, date, js
 grant execute on function public.create_mood_entry(uuid, text, text) to authenticated;
 grant execute on function public.create_space_calendar_event(uuid, text, date, public.recurrence_type, text, text) to authenticated;
 grant execute on function public.update_couple_preferences(text, text, date, jsonb) to authenticated;
+
+create or replace function public.shares_active_space(
+  requested_user_id uuid,
+  viewer_user_id uuid default auth.uid()
+) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select viewer_user_id is not null and (
+    requested_user_id = viewer_user_id
+    or exists (
+      select 1
+      from public.space_members as requested_member
+      join public.space_members as viewer_member
+        on viewer_member.space_id = requested_member.space_id
+      where requested_member.user_id = requested_user_id
+        and requested_member.active
+        and viewer_member.user_id = viewer_user_id
+        and viewer_member.active
+    )
+  );
+$$;
+
+drop policy if exists "couple members can read profiles" on public.profiles;
+create policy "users can read self and active space profiles" on public.profiles
+for select to authenticated using (public.shares_active_space(id));
+
+revoke execute on function public.shares_active_space(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.shares_active_space(uuid, uuid) to authenticated;
+
+create or replace function public.calendar_event_occurs_on(
+  event_date date,
+  event_recurrence public.recurrence_type,
+  target_date date
+) returns boolean
+language plpgsql immutable set search_path = '' as $$
+declare
+  v_candidate date;
+  v_last_day integer;
+begin
+  if event_date > target_date then return false; end if;
+  if event_recurrence = 'none' then return event_date = target_date; end if;
+  if event_recurrence = 'yearly' and extract(month from event_date) <> extract(month from target_date) then
+    return false;
+  end if;
+  v_last_day := extract(day from (
+    date_trunc('month', target_date::timestamp) + interval '1 month - 1 day'
+  ));
+  v_candidate := make_date(
+    extract(year from target_date)::integer,
+    extract(month from target_date)::integer,
+    least(extract(day from event_date)::integer, v_last_day)
+  );
+  return v_candidate = target_date;
+end;
+$$;
+
+alter function public.create_legacy_notification(text, uuid)
+  rename to create_legacy_notification_task7;
+
+create or replace function public.create_legacy_notification(
+  p_kind text,
+  p_source_id uuid
+) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_actor_id uuid := auth.uid();
+  v_space_id uuid;
+  v_recipient_id uuid;
+  v_today date := (now() at time zone 'Asia/Shanghai')::date;
+  v_event record;
+begin
+  if p_kind <> 'calendar_event' then
+    perform public.create_legacy_notification_task7(p_kind, p_source_id);
+    return;
+  end if;
+  if v_actor_id is null then
+    raise exception 'active membership required' using errcode = '42501';
+  end if;
+  v_space_id := public.resolve_single_active_space(v_actor_id);
+
+  select event.id, event.name, event.creator_id, event.space_id, event.event_date, event.recurrence
+  into v_event
+  from public.calendar_events as event
+  where event.id = p_source_id
+    and event.space_id = v_space_id
+    and public.is_active_space_member(event.space_id, event.creator_id);
+  if not found then
+    raise exception 'calendar notification source is outside caller space' using errcode = '42501';
+  end if;
+  if not public.calendar_event_occurs_on(v_event.event_date, v_event.recurrence, v_today) then
+    raise exception 'calendar event is not due today' using errcode = '22023';
+  end if;
+
+  for v_recipient_id in
+    select member.user_id from public.space_members as member
+    where member.space_id = v_space_id and member.active
+  loop
+    if not exists (
+      select 1 from public.notifications as notification
+      where notification.recipient_id = v_recipient_id
+        and notification.type = 'calendar_event'
+        and notification.source_id = v_event.id
+        and (notification.created_at at time zone 'Asia/Shanghai')::date = v_today
+    ) then
+      insert into public.notifications(recipient_id, type, source_id, title, body)
+      values (v_recipient_id, 'calendar_event', v_event.id, '今日提醒', v_event.name);
+    end if;
+  end loop;
+end;
+$$;
+
+revoke execute on function public.calendar_event_occurs_on(date, public.recurrence_type, date) from public, anon, authenticated;
+revoke execute on function public.create_legacy_notification_task7(text, uuid) from public, anon, authenticated;
+revoke execute on function public.create_legacy_notification(text, uuid) from public, anon;
+grant execute on function public.create_legacy_notification(text, uuid) to authenticated;

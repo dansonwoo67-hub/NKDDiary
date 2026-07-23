@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/features/profile/actions";
 import { getChinaDateString } from "@/lib/date/china-day";
+import { getEventOccurrenceInMonth, type CalendarRecurrence } from "./recurrence";
 
 export type CalendarEventInput = {
   name: string;
@@ -84,26 +85,6 @@ export async function createCalendarEventFromForm(formData: FormData) {
   });
 }
 
-function eventOccurrenceDate(eventDate: string, recurrence: string, year: number, month: number) {
-  const [originalYear, originalMonth, originalDay] = eventDate.split("-").map(Number);
-  const targetDay = Math.min(originalDay, new Date(Date.UTC(year, month, 0)).getUTCDate());
-  const occurrence = `${year}-${String(month).padStart(2, "0")}-${String(targetDay).padStart(2, "0")}`;
-
-  if (recurrence === "none") {
-    return originalYear === year && originalMonth === month ? eventDate : null;
-  }
-
-  if (recurrence === "monthly") {
-    return occurrence;
-  }
-
-  if (recurrence === "yearly" && originalMonth === month) {
-    return occurrence;
-  }
-
-  return null;
-}
-
 async function ensureTodayEventNotifications(events: Array<{ id: string; name: string; eventDate: string }>) {
   if (events.length === 0) return;
 
@@ -140,7 +121,7 @@ export async function getMonthCalendarState(year: number, month: number): Promis
   const dueToday: Array<{ id: string; name: string; eventDate: string }> = [];
 
   for (const event of events ?? []) {
-    const occurrence = eventOccurrenceDate(String(event.event_date), String(event.recurrence), year, month);
+    const occurrence = getEventOccurrenceInMonth(String(event.event_date), String(event.recurrence) as CalendarRecurrence, year, month);
     if (!occurrence) continue;
 
     const chip = {
