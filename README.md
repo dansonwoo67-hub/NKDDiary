@@ -33,8 +33,9 @@ The release procedure and manual security evidence live in:
 4. Apply the migrations in the exact order listed in the deployment checklist.
    Verify that `journal-images` is private before continuing.
 
-5. Create two Auth users in Supabase, record their UUIDs in the local file,
-   then seed the one active couple space:
+5. Create two Auth users in Supabase. Record their UUIDs and display names for
+   the seed script; record their email/password only when you will run local
+   two-user E2E. Then seed the one active couple space:
 
    ```powershell
    npm run seed:couple-users
@@ -66,9 +67,10 @@ checks, and responsive checks before requesting production deployment.
 ## Vercel
 
 Configure only the runtime variables documented in the deployment checklist.
-The two account credentials and `SUPABASE_SECRET_KEY` are local seeding
-credentials and do not belong in Vercel. `SUPABASE_SERVICE_ROLE_KEY` is a
-server-only Vercel secret required by the comment create/update path.
+The two account credentials are local E2E fixture credentials, while
+`SUPABASE_SECRET_KEY` is a local seeding secret; neither belongs in Vercel.
+`SUPABASE_SERVICE_ROLE_KEY` is a server-only Vercel secret required by the
+comment create/update path and is also a local E2E prerequisite.
 
 Do not apply production migrations or deploy until explicit approval has been
 given. If a release must be rolled back, redeploy the previous verified commit;

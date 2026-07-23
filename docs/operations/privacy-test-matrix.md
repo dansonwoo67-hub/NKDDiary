@@ -44,28 +44,30 @@ release). `NOT RUN` = no live observation yet (also blocks release).
 
 | ID | Role / state | Check | Expected result | Status | Evidence / notes |
 | --- | --- | --- | --- | --- | --- |
-| P-09 | Author / own today diary | Edit and delete | Own today diary can be edited/deleted within the application rules; its image cleanup result is recorded. | NOT RUN | |
-| P-10 | Recipient | Edit/delete another user's diary | Cannot edit or delete the author's diary. | NOT RUN | |
-| P-11 | Author | Open future diary addressed to recipient | Cannot open a diary addressed to the recipient. | NOT RUN | |
-| P-12 | Recipient / before `open_at` | Open action | Open fails; title/body/image remain sealed. | NOT RUN | |
-| P-13 | Recipient / at or after `open_at` | Open action | Exactly the designated recipient can actively open; repeat use is safe/idempotent and content becomes available only after opening. | NOT RUN | |
-| P-14 | Author and recipient / readable entry | Comments | Both permitted active members can read/create allowed comments; comment create/update requires the server-only service-role path. | NOT RUN | |
-| P-15 | Guest and non-member | Comments | Cannot list, create, update, or delete comments. | NOT RUN | |
-| P-16 | Author and recipient / readable entry | Annotations and replies | Allowed only when the diary is readable and interaction policy permits it; each actor can manage only its own annotation/reply. | NOT RUN | |
-| P-17 | Guest, non-member, sealed recipient | Annotations and replies | No listing or mutation succeeds while unauthenticated, outside the space, or before full-content access. | NOT RUN | |
-| P-18 | Author and recipient | Notifications | Each sees only notifications addressed to that account; future-open notification has no private diary content leak. | NOT RUN | |
-| P-19 | Guest and non-member | Notifications | Cannot read another member's notifications or create a future-open notification. | NOT RUN | |
+| P-09 | Author / own today diary before its 24-hour lock | Edit and delete | Can edit/delete the diary; if it has an image, record its cleanup result. | NOT RUN | |
+| P-10 | Author / own today diary at or after its 24-hour lock | Edit and delete | Cannot edit or delete through the UI, direct route, or mutation; it remains a shared memory. | NOT RUN | |
+| P-11 | Recipient | Edit/delete another user's diary | Cannot edit or delete the author's diary. | NOT RUN | |
+| P-12 | Author / sealed future diary | Edit, withdraw, and delete | Can reread the sent diary but cannot edit, withdraw, or delete it through the UI, direct route, or mutation. | NOT RUN | |
+| P-13 | Author | Open future diary addressed to recipient | Cannot open a diary addressed to the recipient. | NOT RUN | |
+| P-14 | Recipient / before `open_at` | Open action | Open fails; title/body/image remain sealed. | NOT RUN | |
+| P-15 | Recipient / at or after `open_at` | Open action | Exactly the designated recipient can actively open; repeat use is safe/idempotent and content becomes available only after opening. | NOT RUN | |
+| P-16 | Author and recipient / readable entry | Comments | Both permitted active members can read/create allowed comments; comment create/update requires the server-only service-role path. | NOT RUN | |
+| P-17 | Guest and non-member | Comments | Cannot list, create, update, or delete comments. | NOT RUN | |
+| P-18 | Author and recipient / readable entry | Annotations and replies | Allowed only when the diary is readable and interaction policy permits it; each actor can manage only its own annotation/reply. | NOT RUN | |
+| P-19 | Guest, non-member, sealed recipient | Annotations and replies | No listing or mutation succeeds while unauthenticated, outside the space, or before full-content access. | NOT RUN | |
+| P-20 | Author and recipient | Notifications | Each sees only notifications addressed to that account; future-open notification has no private diary content leak. | NOT RUN | |
+| P-21 | Guest and non-member | Notifications | Cannot read another member's notifications or create a future-open notification. | NOT RUN | |
 
 ## Storage and signed URLs
 
 | ID | Role / state | Check | Expected result | Status | Evidence / notes |
 | --- | --- | --- | --- | --- | --- |
-| P-20 | Author | JPEG, PNG, WebP input | Each valid source type at or below 10 MiB is compressed to WebP; stored output is no more than 800 KiB. | NOT RUN | |
-| P-21 | Author | GIF, source >10 MiB, or output >800 KiB | Input is rejected and no canonical journal image remains. | NOT RUN | |
-| P-22 | Any browser / guessed object URL | Direct Storage access | `journal-images` is private; a guessed public object URL cannot retrieve the image. | NOT RUN | |
-| P-23 | Authorized full-content reader | Signed URL | A signed URL is generated only after full-content authorization and has a 300-second lifetime. | NOT RUN | |
-| P-24 | Sealed recipient, guest, non-member | Signed URL | No signed URL is returned or rendered. | NOT RUN | |
-| P-25 | Author / forced diary write failure | Orphan cleanup | New uploaded object is removed, or failed removal is represented by a queued cleanup job; no unexplained orphan is left. | NOT RUN | |
+| P-22 | Author | JPEG, PNG, WebP input | Each valid source type at or below 10 MiB is compressed to WebP; stored output is no more than 800 KiB. | NOT RUN | |
+| P-23 | Author | GIF, source >10 MiB, or output >800 KiB | Input is rejected and no canonical journal image remains. | NOT RUN | |
+| P-24 | Any browser / guessed object URL | Direct Storage access | `journal-images` is private; a guessed public object URL cannot retrieve the image. | NOT RUN | |
+| P-25 | Authorized full-content reader | Signed URL | A signed URL is generated only after full-content authorization and has a 300-second lifetime. | NOT RUN | |
+| P-26 | Sealed recipient, guest, non-member | Signed URL | No signed URL is returned or rendered. | NOT RUN | |
+| P-27 | Author / duplicate-today quota conflict after successful upload | Orphan cleanup | The second valid today submission uploads first, its diary RPC fails on quota, then the exact uploaded object is removed or represented by a matching `database_write_failed` cleanup job. | NOT RUN | |
 
 ## Responsive acceptance
 
