@@ -365,6 +365,23 @@ describe("private journal image storage migration", () => {
     expect(migration).not.toContain("grant execute on function public.update_journal_comment(uuid, uuid, text) to authenticated");
   });
 
+  it("lets any active space member interact with a today diary while keeping future diaries participant-only", () => {
+    const migration = readMigration();
+
+    for (const name of ["create_journal_comment", "update_journal_comment"]) {
+      const start = migration.indexOf(`create or replace function public.${name}`);
+      const end = migration.indexOf("\n$$;", start);
+      const definition = migration.slice(start, end);
+
+      expect(definition).toMatch(
+        /public\.is_active_space_member\(journal\.space_id, p_actor_id\)[\s\S]*?and \(\s*journal\.entry_type = 'today'\s*or \(\s*journal\.entry_type = 'future'\s*and journal\.opened_at is not null\s*and \(journal\.author_id = p_actor_id or journal\.recipient_id = p_actor_id\)\s*\)\s*\)/,
+      );
+      expect(definition).not.toMatch(
+        /\)\s*and \(journal\.author_id = p_actor_id or journal\.recipient_id = p_actor_id\)/,
+      );
+    }
+  });
+
   it("locks and binds comment rows to the explicit actor and their journal", () => {
     const migration = readMigration();
     const createStart = migration.indexOf("create or replace function public.create_journal_comment");

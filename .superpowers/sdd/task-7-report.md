@@ -48,12 +48,14 @@ diaries remain non-interactive for both author and recipient.
 - A third review produced RED tests for the missing server-only service client,
   explicit actor authorization, the 200-heart exact boundary, calendar
   self-recipient behavior, and Escape cleanup before implementation.
+- The final review added an observed RED SQL contract proving that a non-author
+  active member can interact with a today diary before correcting the boolean
+  grouping in both comment RPCs.
 
 ## Verification
 
-- Focused third-review service/action/component/migration suite: PASS — 4 files,
-  45 tests.
-- Full `npm test`: PASS — 31 files, 187 tests.
+- Focused final migration suite: PASS — 1 file, 26 tests.
+- Full `npm test`: PASS — 31 files, 188 tests.
 - `npm run lint`: PASS — no errors or warnings.
 - `npm run build`: PASS.
 - `git diff --check`: PASS.
@@ -70,7 +72,7 @@ diaries remain non-interactive for both author and recipient.
 
 ## Independent review remediation
 
-Follow-up hardening completed after three Task 7 reviews:
+Follow-up hardening completed after the Task 7 review sequence:
 
 - Removed the legacy authenticated notification INSERT policy and table grant
   before introducing the future-open enum value. Existing annotation, reply,
@@ -96,6 +98,10 @@ Follow-up hardening completed after three Task 7 reviews:
   comment/journal identity binding all use the explicit actor. The database now
   keeps only an NFC-normalized 20,000-code-point storage/DoS ceiling, allowing
   valid inputs such as 200 `❤️` graphemes while the server action rejects 201.
+- Today-diary comment creation and updates now require active space membership
+  without an author/recipient restriction, matching the shared-diary model.
+  Opened future diaries retain the stricter author-or-recipient participant
+  requirement.
 - `selectionchange` now only records a candidate ref. Document `pointerup` and
   `keyup` perform the final commit; touch waits for a quiet period and exposes a
   non-focus-stealing “添加评注” button. A readonly accessible textarea provides

@@ -701,9 +701,12 @@ begin
     and public.is_active_space_member(journal.space_id, p_actor_id)
     and (
       journal.entry_type = 'today'
-      or (journal.entry_type = 'future' and journal.opened_at is not null)
+      or (
+        journal.entry_type = 'future'
+        and journal.opened_at is not null
+        and (journal.author_id = p_actor_id or journal.recipient_id = p_actor_id)
+      )
     )
-    and (journal.author_id = p_actor_id or journal.recipient_id = p_actor_id)
   for share;
   if not found then
     raise exception 'journal entry not found' using errcode = 'P0002';
@@ -745,9 +748,12 @@ begin
     and public.is_active_space_member(journal.space_id, p_actor_id)
     and (
       journal.entry_type = 'today'
-      or (journal.entry_type = 'future' and journal.opened_at is not null)
+      or (
+        journal.entry_type = 'future'
+        and journal.opened_at is not null
+        and (journal.author_id = p_actor_id or journal.recipient_id = p_actor_id)
+      )
     )
-    and (journal.author_id = p_actor_id or journal.recipient_id = p_actor_id)
   for update;
   if not found then
     raise exception 'comment not found or immutable' using errcode = 'P0002';
