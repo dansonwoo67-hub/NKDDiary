@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import type { JournalActionResult } from "@/features/journal/actions";
 import {
   JOURNAL_BODY_BLOCK_ID,
@@ -109,6 +110,24 @@ async function callMutation(
   return { ok: true, message: successMessage, entryId };
 }
 
+async function callCommentMutation(
+  entryId: string,
+  rpcName: "create_journal_comment" | "update_journal_comment",
+  args: Record<string, unknown>,
+  successMessage: string,
+): Promise<JournalActionResult> {
+  const { userId } = await requireUser();
+  try {
+    const client = await createServiceRoleSupabaseClient();
+    const { error } = await client.rpc(rpcName, { ...args, p_actor_id: userId });
+    if (error) return safeFailure();
+  } catch {
+    return safeFailure();
+  }
+  revalidateEntry(entryId);
+  return { ok: true, message: successMessage, entryId };
+}
+
 export async function getJournalInteractions(entryId: string): Promise<JournalInteractions> {
   const parsedId = idSchema.safeParse(entryId);
   if (!parsedId.success) return { comments: [], annotations: [] };
@@ -179,7 +198,7 @@ export async function createCommentAction(input: {
   const body = validateCommentBody(input.body);
   if (!entryId.success) return safeFailure();
   if (!body.ok) return body;
-  return callMutation(entryId.data, "create_journal_comment", {
+  return callCommentMutation(entryId.data, "create_journal_comment", {
     p_entry_id: entryId.data,
     p_body: body.value,
   }, "评论已发布。");
@@ -194,7 +213,7 @@ export async function updateCommentAction(input: {
   const body = validateCommentBody(input.body);
   if (!ids.success) return safeFailure();
   if (!body.ok) return body;
-  return callMutation(ids.data.entryId, "update_journal_comment", {
+  return callCommentMutation(ids.data.entryId, "update_journal_comment", {
     p_comment_id: ids.data.commentId,
     p_body: body.value,
   }, "评论已更新。");

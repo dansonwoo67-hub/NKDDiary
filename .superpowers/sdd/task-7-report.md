@@ -45,11 +45,15 @@ diaries remain non-interactive for both author and recipient.
   covering intermediate selection, final commits, touch, focus, and keyboard.
 - Journal reader integration and notification routing were observed failing for
   the new behavior before implementation.
+- A third review produced RED tests for the missing server-only service client,
+  explicit actor authorization, the 200-heart exact boundary, calendar
+  self-recipient behavior, and Escape cleanup before implementation.
 
 ## Verification
 
-- Focused second-review component/migration suite: PASS — 2 files, 33 tests.
-- Full `npm test`: PASS — 30 files, 181 tests.
+- Focused third-review service/action/component/migration suite: PASS — 4 files,
+  45 tests.
+- Full `npm test`: PASS — 31 files, 187 tests.
 - `npm run lint`: PASS — no errors or warnings.
 - `npm run build`: PASS.
 - `git diff --check`: PASS.
@@ -58,13 +62,15 @@ diaries remain non-interactive for both author and recipient.
 
 - No live Supabase database was available, so migration behavior is covered by
   durable SQL contract tests rather than an applied migration integration test.
+- Deployments must provide `SUPABASE_SERVICE_ROLE_KEY` as a server-only secret;
+  missing configuration safely disables comment creation and updates.
 - Next.js reports the repository's pre-existing multiple-lockfile workspace-root
   warning during build; compilation, type checking, and page generation all
   succeed.
 
 ## Independent review remediation
 
-Follow-up hardening completed after two Task 7 reviews:
+Follow-up hardening completed after three Task 7 reviews:
 
 - Removed the legacy authenticated notification INSERT policy and table grant
   before introducing the future-open enum value. Existing annotation, reply,
@@ -78,15 +84,23 @@ Follow-up hardening completed after two Task 7 reviews:
 - Tightened the legacy notification RPC to resolve exactly one active space for
   the caller and every legacy source actor. It rejects mismatched/non-unique
   source and recipient membership, and calendar recipients now come only from
-  active `space_members` in that caller space rather than all profiles.
-- Replaced the handwritten grapheme approximation with the conservative
-  database rule `char_length(normalize(body, NFC)) <= 200` in the table CHECK
-  and both mutation RPCs. Regression vectors cover 201 ASCII code points,
-  repeated ZWJ input, and a leading combining mark; the client retains its
-  friendlier `Intl.Segmenter` validation.
+  active `space_members` in that caller space rather than all profiles. Calendar
+  reminders intentionally include the caller as well as their partner.
+- Comment create/update RPC execution is revoked from authenticated clients and
+  granted only to `service_role`. A dedicated server-only Supabase client is
+  used exclusively after `requireUser` and exact `Intl.Segmenter` validation;
+  it passes that authenticated user as `p_actor_id` and is never used for reads
+  or other ordinary mutations.
+- Comment RPCs no longer infer the terminal user from `auth.uid()`. Membership,
+  journal eligibility, authorship, the four-hour window, row locks, and
+  comment/journal identity binding all use the explicit actor. The database now
+  keeps only an NFC-normalized 20,000-code-point storage/DoS ceiling, allowing
+  valid inputs such as 200 `❤️` graphemes while the server action rejects 201.
 - `selectionchange` now only records a candidate ref. Document `pointerup` and
   `keyup` perform the final commit; touch waits for a quiet period and exposes a
   non-focus-stealing “添加评注” button. A readonly accessible textarea provides
   a real keyboard selection range, and closing the dialog restores focus to the
   originating body control. Both cross-block directions and external
   selections remain covered.
+- Closing or pressing Escape also clears a pending touch candidate, restores
+  focus once, and clears the saved focus target to prevent later focus jumps.

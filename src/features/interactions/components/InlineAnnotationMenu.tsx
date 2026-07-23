@@ -150,11 +150,14 @@ export function InlineAnnotationMenu({ entryId, content, annotations }: { entryI
   }, [anchor]);
 
   function closeMenu() {
+    const restoreTarget = restoreFocusRef.current;
+    restoreFocusRef.current = null;
     setAnchor(null);
+    setPendingCandidate(null);
     setComment("");
     candidateRef.current = null;
     window.getSelection()?.removeAllRanges();
-    queueMicrotask(() => restoreFocusRef.current?.focus());
+    queueMicrotask(() => restoreTarget?.focus());
   }
 
   function openPendingCandidate() {

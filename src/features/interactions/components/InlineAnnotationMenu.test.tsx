@@ -227,6 +227,45 @@ describe("InlineAnnotationMenu", () => {
     expect(screen.getByLabelText("评注")).toHaveFocus();
   });
 
+  it("Escape clears a pending touch candidate, restores focus once, and forgets the target", async () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <div>
+        <button type="button">外部按钮</button>
+        <InlineAnnotationMenu entryId="11111111-1111-4111-8111-111111111111" content="正文" annotations={[]} />
+      </div>,
+    );
+    const body = container.querySelector('[data-block-id="body"]') as HTMLElement;
+    const section = body.closest("section")!;
+    body.focus();
+    const textNode = body.firstChild?.firstChild;
+    const prefix = { selectNodeContents: vi.fn(), setEnd: vi.fn(), toString: () => "" };
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textNode,
+      focusNode: textNode,
+      rangeCount: 1,
+      getRangeAt: () => ({ startContainer: textNode, startOffset: 0, toString: () => "正文", cloneRange: () => prefix }),
+      toString: () => "正文",
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection);
+    document.dispatchEvent(new Event("selectionchange"));
+    fireEvent.pointerUp(document, { pointerType: "touch" });
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByRole("button", { name: "添加评注" })).toBeVisible();
+
+    fireEvent.keyDown(body, { key: "Escape" });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByRole("button", { name: "添加评注" })).not.toBeInTheDocument();
+    expect(body).toHaveFocus();
+
+    const outside = screen.getByRole("button", { name: "外部按钮" });
+    outside.focus();
+    fireEvent.keyDown(section, { key: "Escape" });
+    await act(async () => { await Promise.resolve(); });
+    expect(outside).toHaveFocus();
+  });
+
   it("supports real keyboard selection and restores focus when the dialog closes", async () => {
     render(
       <InlineAnnotationMenu entryId="11111111-1111-4111-8111-111111111111" content="今天散步" annotations={[]} />,

@@ -20,11 +20,12 @@ npm install
 Copy-Item .env.local.example .env.local
 ```
 
-3. 填写 `.env.local`。前两项已经是 Supabase 项目的公开配置；`SUPABASE_SECRET_KEY` 和两个人账号只用于本地执行种子脚本：
+3. 填写 `.env.local`。前两项是 Supabase 的公开配置；`SUPABASE_SERVICE_ROLE_KEY` 仅供服务端执行经过终端用户校验的评论写入，`SUPABASE_SECRET_KEY` 和两个人账号只用于本地执行种子脚本：
 
 ```dotenv
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 SUPABASE_SECRET_KEY=
 COUPLE_USER_A_EMAIL=
 COUPLE_USER_A_PASSWORD=
@@ -35,7 +36,7 @@ COUPLE_USER_B_DISPLAY_NAME=
 NEXT_PUBLIC_RELATIONSHIP_START_DATE=2024-01-01
 ```
 
-`SUPABASE_SECRET_KEY` 只能放在本地或服务端环境变量里，绝对不要改名成 `NEXT_PUBLIC_*`，也不要提交到 Git。
+`SUPABASE_SERVICE_ROLE_KEY` 和 `SUPABASE_SECRET_KEY` 只能放在服务端环境变量里，绝对不要改名成 `NEXT_PUBLIC_*`，也不要提交到 Git。缺少 `SUPABASE_SERVICE_ROLE_KEY` 时，评论创建和更新会安全失败，不会降级使用公开密钥。
 
 4. 启动：
 
@@ -79,10 +80,11 @@ npm run test:e2e
 3. 设置网页运行需要的环境变量：
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`（仅服务端）
    - `NEXT_PUBLIC_RELATIONSHIP_START_DATE`
 4. 部署。
 
-两个人的邮箱、密码和 `SUPABASE_SECRET_KEY` 只用于本地执行 `npm run seed:couple-users`，不需要放进 Vercel。
+两个人的邮箱、密码和 `SUPABASE_SECRET_KEY` 只用于本地执行 `npm run seed:couple-users`，不需要放进 Vercel。`SUPABASE_SERVICE_ROLE_KEY` 则是评论创建/更新所需的服务端运行变量。
 
 ## 视觉素材
 

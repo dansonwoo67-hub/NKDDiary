@@ -232,7 +232,11 @@ describe("private journal image storage migration", () => {
       const start = migration.indexOf(`create or replace function public.${name}`);
       const end = migration.indexOf("\n$$;", start);
       const definition = migration.slice(start, end);
-      expect(definition).toContain("comment.author_id = auth.uid()");
+      expect(definition).toContain(
+        name === "update_journal_comment"
+          ? "comment.author_id = p_actor_id"
+          : "comment.author_id = auth.uid()",
+      );
       expect(definition).toContain("clock_timestamp() <= comment.created_at + interval '4 hours'");
       expect(definition).toContain("for update");
     }
@@ -294,7 +298,7 @@ describe("private journal image storage migration", () => {
     expect(legacy).toContain("raise exception 'legacy notification recipient is outside caller space'");
   });
 
-  it("derives calendar recipients only from active members of the caller's space", () => {
+  it("derives calendar recipients from every active member of the caller's space, including the caller", () => {
     const migration = readMigration();
     const start = migration.indexOf("create or replace function public.create_legacy_notification");
     const end = migration.indexOf("\n$$;", start);
@@ -303,7 +307,7 @@ describe("private journal image storage migration", () => {
     expect(definition).toContain("from public.space_members as member");
     expect(definition).toContain("member.space_id = v_space_id");
     expect(definition).toContain("member.active");
-    expect(definition).toContain("member.user_id <> v_actor_id");
+    expect(definition).not.toContain("member.user_id <> v_actor_id");
     expect(definition).not.toMatch(/for\s+v_recipient_id\s+in[\s\S]*?from\s+public\.profiles/);
   });
 
@@ -325,18 +329,57 @@ describe("private journal image storage migration", () => {
     expect(open).not.toMatch(/on conflict[\s\S]*where title/);
   });
 
-  it("conservatively enforces a normalized 200-codepoint comment limit in every database entry point", () => {
+  it("keeps only a normalized storage ceiling in the database so exact client grapheme limits remain valid", () => {
     const migration = readMigration();
     expect(migration).not.toContain("journal_visible_grapheme_count");
-    expect(migration).toContain("char_length(normalize(btrim(body), nfc)) <= 200");
+    expect(migration).toContain("char_length(normalize(btrim(body), nfc)) between 1 and 20000");
     for (const name of ["create_journal_comment", "update_journal_comment"]) {
       const start = migration.indexOf(`create or replace function public.${name}`);
       const end = migration.indexOf("\n$$;", start);
-      expect(migration.slice(start, end)).toContain("char_length(normalize(btrim(p_body), nfc)) > 200");
+      const definition = migration.slice(start, end);
+      expect(definition).toContain("char_length(normalize(btrim(p_body), nfc)) not between 1 and 20000");
+      expect(definition).not.toMatch(/normalize\(btrim\(p_body\), nfc\)\)\s*>\s*200/);
+    }
+  });
+
+  it("makes comment create/update service-role-only and binds every authorization decision to the explicit actor", () => {
+    const migration = readMigration();
+
+    for (const name of ["create_journal_comment", "update_journal_comment"]) {
+      const start = migration.indexOf(`create or replace function public.${name}`);
+      const end = migration.indexOf("\n$$;", start);
+      const definition = migration.slice(start, end);
+
+      expect(definition).toContain("p_actor_id uuid");
+      expect(definition).not.toContain("auth.uid()");
+      expect(definition).toContain("public.is_active_space_member(journal.space_id, p_actor_id)");
+      expect(definition).toContain("journal.author_id = p_actor_id");
+      expect(definition).toContain("journal.recipient_id = p_actor_id");
     }
 
-    expect(Array.from("a".repeat(201).normalize("NFC"))).toHaveLength(201);
-    expect(Array.from("a\u200db".repeat(67).normalize("NFC"))).toHaveLength(201);
-    expect(Array.from(("\u0301" + "a".repeat(200)).normalize("NFC"))).toHaveLength(201);
+    expect(migration).toContain("revoke execute on function public.create_journal_comment(uuid, uuid, text) from public, anon, authenticated");
+    expect(migration).toContain("revoke execute on function public.update_journal_comment(uuid, uuid, text) from public, anon, authenticated");
+    expect(migration).toContain("grant execute on function public.create_journal_comment(uuid, uuid, text) to service_role");
+    expect(migration).toContain("grant execute on function public.update_journal_comment(uuid, uuid, text) to service_role");
+    expect(migration).not.toContain("grant execute on function public.create_journal_comment(uuid, uuid, text) to authenticated");
+    expect(migration).not.toContain("grant execute on function public.update_journal_comment(uuid, uuid, text) to authenticated");
+  });
+
+  it("locks and binds comment rows to the explicit actor and their journal", () => {
+    const migration = readMigration();
+    const createStart = migration.indexOf("create or replace function public.create_journal_comment");
+    const createEnd = migration.indexOf("\n$$;", createStart);
+    const create = migration.slice(createStart, createEnd);
+    const updateStart = migration.indexOf("create or replace function public.update_journal_comment");
+    const updateEnd = migration.indexOf("\n$$;", updateStart);
+    const update = migration.slice(updateStart, updateEnd);
+
+    expect(create).toContain("for share");
+    expect(create).toContain("values (v_space_id, p_entry_id, p_actor_id, btrim(p_body))");
+    expect(update).toContain("comment.author_id = p_actor_id");
+    expect(update).toContain("comment.entry_id = journal.id");
+    expect(update).toContain("comment.space_id = journal.space_id");
+    expect(update).toContain("clock_timestamp() <= comment.created_at + interval '4 hours'");
+    expect(update).toContain("for update");
   });
 });

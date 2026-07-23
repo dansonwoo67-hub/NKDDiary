@@ -507,8 +507,7 @@ create table public.journal_comments (
   entry_id uuid not null references public.journal_entries(id) on delete cascade,
   author_id uuid not null references public.profiles(id) on delete restrict,
   body text not null check (
-    char_length(btrim(body)) between 1 and 20000
-    and char_length(normalize(btrim(body), NFC)) <= 200
+    char_length(normalize(btrim(body), NFC)) between 1 and 20000
   ),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -682,7 +681,11 @@ revoke insert, update, delete on table public.journal_comments from anon, authen
 revoke insert, update, delete on table public.journal_annotations from anon, authenticated;
 revoke insert, update, delete on table public.annotation_replies from anon, authenticated;
 
-create or replace function public.create_journal_comment(p_entry_id uuid, p_body text)
+create or replace function public.create_journal_comment(
+  p_actor_id uuid,
+  p_entry_id uuid,
+  p_body text
+)
 returns public.journal_comments
 language plpgsql
 security definer
@@ -695,24 +698,34 @@ begin
   select journal.space_id into v_space_id
   from public.journal_entries as journal
   where journal.id = p_entry_id
-    and public.can_interact_with_journal(journal.id);
+    and public.is_active_space_member(journal.space_id, p_actor_id)
+    and (
+      journal.entry_type = 'today'
+      or (journal.entry_type = 'future' and journal.opened_at is not null)
+    )
+    and (journal.author_id = p_actor_id or journal.recipient_id = p_actor_id)
+  for share;
   if not found then
     raise exception 'journal entry not found' using errcode = 'P0002';
   end if;
-  if char_length(btrim(p_body)) not between 1 and 20000
-    or char_length(normalize(btrim(p_body), NFC)) > 200
+  if p_body is null
+    or char_length(normalize(btrim(p_body), NFC)) not between 1 and 20000
   then
     raise exception 'invalid comment' using errcode = '22023';
   end if;
 
   insert into public.journal_comments(space_id, entry_id, author_id, body)
-  values (v_space_id, p_entry_id, auth.uid(), btrim(p_body))
+  values (v_space_id, p_entry_id, p_actor_id, btrim(p_body))
   returning * into v_comment;
   return v_comment;
 end;
 $$;
 
-create or replace function public.update_journal_comment(p_comment_id uuid, p_body text)
+create or replace function public.update_journal_comment(
+  p_actor_id uuid,
+  p_comment_id uuid,
+  p_body text
+)
 returns public.journal_comments
 language plpgsql
 security definer
@@ -723,20 +736,30 @@ declare
 begin
   select comment.* into v_comment
   from public.journal_comments as comment
+  join public.journal_entries as journal
+    on comment.entry_id = journal.id
+   and comment.space_id = journal.space_id
   where comment.id = p_comment_id
-    and comment.author_id = auth.uid()
+    and comment.author_id = p_actor_id
     and clock_timestamp() <= comment.created_at + interval '4 hours'
+    and public.is_active_space_member(journal.space_id, p_actor_id)
+    and (
+      journal.entry_type = 'today'
+      or (journal.entry_type = 'future' and journal.opened_at is not null)
+    )
+    and (journal.author_id = p_actor_id or journal.recipient_id = p_actor_id)
   for update;
-  if not found or not public.can_interact_with_journal(v_comment.entry_id) then
+  if not found then
     raise exception 'comment not found or immutable' using errcode = 'P0002';
   end if;
-  if char_length(btrim(p_body)) not between 1 and 20000
-    or char_length(normalize(btrim(p_body), NFC)) > 200
+  if p_body is null
+    or char_length(normalize(btrim(p_body), NFC)) not between 1 and 20000
   then
     raise exception 'invalid comment' using errcode = '22023';
   end if;
   update public.journal_comments set body = btrim(p_body)
-  where id = p_comment_id returning * into v_comment;
+  where id = p_comment_id and author_id = p_actor_id
+  returning * into v_comment;
   return v_comment;
 end;
 $$;
@@ -1037,7 +1060,6 @@ begin
       from public.space_members as member
       where member.space_id = v_space_id
         and member.active
-        and member.user_id <> v_actor_id
     loop
       if public.resolve_single_active_space(v_recipient_id) is distinct from v_space_id then
         raise exception 'legacy notification recipient is outside caller space' using errcode = '42501';
@@ -1142,8 +1164,8 @@ $$;
 revoke execute on function public.can_interact_with_journal(uuid) from public, anon, authenticated;
 revoke execute on function public.preserve_journal_interaction_identity() from public, anon, authenticated;
 revoke execute on function public.preserve_annotation_reply_identity() from public, anon, authenticated;
-revoke execute on function public.create_journal_comment(uuid, text) from public, anon, authenticated;
-revoke execute on function public.update_journal_comment(uuid, text) from public, anon, authenticated;
+revoke execute on function public.create_journal_comment(uuid, uuid, text) from public, anon, authenticated;
+revoke execute on function public.update_journal_comment(uuid, uuid, text) from public, anon, authenticated;
 revoke execute on function public.delete_journal_comment(uuid) from public, anon, authenticated;
 revoke execute on function public.create_journal_annotation(uuid, text, integer, integer, text, text) from public, anon, authenticated;
 revoke execute on function public.update_journal_annotation(uuid, text) from public, anon, authenticated;
@@ -1154,9 +1176,9 @@ revoke execute on function public.delete_annotation_reply(uuid) from public, ano
 revoke execute on function public.resolve_single_active_space(uuid) from public, anon, authenticated;
 revoke execute on function public.create_legacy_notification(text, uuid) from public, anon, authenticated;
 
-grant execute on function public.create_journal_comment(uuid, text) to authenticated;
+grant execute on function public.create_journal_comment(uuid, uuid, text) to service_role;
 grant execute on function public.can_interact_with_journal(uuid) to authenticated;
-grant execute on function public.update_journal_comment(uuid, text) to authenticated;
+grant execute on function public.update_journal_comment(uuid, uuid, text) to service_role;
 grant execute on function public.delete_journal_comment(uuid) to authenticated;
 grant execute on function public.create_journal_annotation(uuid, text, integer, integer, text, text) to authenticated;
 grant execute on function public.update_journal_annotation(uuid, text) to authenticated;
