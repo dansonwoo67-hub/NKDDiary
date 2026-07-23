@@ -40,3 +40,37 @@ export function loadLocalEnv(cwd = process.cwd()) {
 export function integrationEnvironmentMissing(environment: E2eEnvironment = process.env): string[] {
   return INTEGRATION_ENVIRONMENT_KEYS.filter((key) => !environment[key]);
 }
+
+const BROWSER_CONTEXT_OPTION_KEYS = [
+  "acceptDownloads",
+  "bypassCSP",
+  "colorScheme",
+  "deviceScaleFactor",
+  "extraHTTPHeaders",
+  "geolocation",
+  "hasTouch",
+  "httpCredentials",
+  "ignoreHTTPSErrors",
+  "isMobile",
+  "javaScriptEnabled",
+  "locale",
+  "offline",
+  "permissions",
+  "proxy",
+  "reducedMotion",
+  "screen",
+  "serviceWorkers",
+  "timezoneId",
+  "userAgent",
+  "viewport",
+] as const;
+
+export function browserContextOptionsFromProjectUse(projectUse: Record<string, unknown>) {
+  return Object.fromEntries(
+    BROWSER_CONTEXT_OPTION_KEYS.flatMap((key) => projectUse[key] === undefined ? [] : [[key, projectUse[key]]]),
+  );
+}
+
+export function isExpectedLoginReadiness(status: number, body: string) {
+  return status === 200 && body.includes("NKD DIARY");
+}

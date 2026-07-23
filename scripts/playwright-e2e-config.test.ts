@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  browserContextOptionsFromProjectUse,
   integrationEnvironmentMissing,
+  isExpectedLoginReadiness,
   parseEnvFile,
 } from "./playwright-e2e-config";
 
@@ -24,5 +26,27 @@ describe("Playwright E2E environment", () => {
       "COUPLE_USER_B_EMAIL",
       "COUPLE_USER_B_PASSWORD",
     ]);
+  });
+
+  it("keeps only browser-context options from a Playwright project", () => {
+    expect(browserContextOptionsFromProjectUse({
+      viewport: { width: 412, height: 915 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent: "mobile-agent",
+      trace: "on-first-retry",
+      baseURL: "http://127.0.0.1:3000",
+    })).toEqual({
+      viewport: { width: 412, height: 915 },
+      isMobile: true,
+      hasTouch: true,
+      userAgent: "mobile-agent",
+    });
+  });
+
+  it("accepts readiness only for the application's successful login page", () => {
+    expect(isExpectedLoginReadiness(200, "<p>NKD DIARY</p>")).toBe(true);
+    expect(isExpectedLoginReadiness(404, "<p>NKD DIARY</p>")).toBe(false);
+    expect(isExpectedLoginReadiness(200, "unrelated server")).toBe(false);
   });
 });
