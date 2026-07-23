@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   browserContextOptionsFromProjectUse,
+  fetchExpectedLoginReadiness,
+  hasChildExited,
   integrationEnvironmentMissing,
   isExpectedLoginReadiness,
   parseEnvFile,
@@ -48,5 +50,24 @@ describe("Playwright E2E environment", () => {
     expect(isExpectedLoginReadiness(200, "<p>NKD DIARY</p>")).toBe(true);
     expect(isExpectedLoginReadiness(404, "<p>NKD DIARY</p>")).toBe(false);
     expect(isExpectedLoginReadiness(200, "unrelated server")).toBe(false);
+  });
+
+  it("treats either exit code or signal code as a completed child", () => {
+    expect(hasChildExited({ exitCode: null, signalCode: null })).toBe(false);
+    expect(hasChildExited({ exitCode: 0, signalCode: null })).toBe(true);
+    expect(hasChildExited({ exitCode: null, signalCode: "SIGTERM" })).toBe(true);
+  });
+
+  it("keeps the readiness deadline active while reading the login body", async () => {
+    const fetcher = async (_url: string, init?: { signal?: AbortSignal }) => ({
+      status: 200,
+      text: () => new Promise<string>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      }),
+    });
+
+    await expect(fetchExpectedLoginReadiness(fetcher, "http://example.test/login", 10)).rejects.toMatchObject({
+      name: "AbortError",
+    });
   });
 });

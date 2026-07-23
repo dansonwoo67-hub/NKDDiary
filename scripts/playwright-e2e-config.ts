@@ -74,3 +74,25 @@ export function browserContextOptionsFromProjectUse(projectUse: Record<string, u
 export function isExpectedLoginReadiness(status: number, body: string) {
   return status === 200 && body.includes("NKD DIARY");
 }
+
+type LoginReadinessResponse = { status: number; text: () => Promise<string> };
+
+export async function fetchExpectedLoginReadiness(
+  fetcher: (url: string, init: { signal: AbortSignal }) => Promise<LoginReadinessResponse>,
+  url: string,
+  timeoutMs: number,
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetcher(url, { signal: controller.signal });
+    const body = await response.text();
+    return isExpectedLoginReadiness(response.status, body);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function hasChildExited(child: { exitCode: number | null; signalCode: string | null }) {
+  return child.exitCode !== null || child.signalCode !== null;
+}

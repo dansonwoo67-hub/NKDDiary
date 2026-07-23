@@ -16,6 +16,7 @@ const todayBody = `${marker} today's body`;
 const futureTitle = `${titlePrefix} future private`;
 const futureBody = `${marker} future body that must stay private`;
 const task9TitlePrefix = "[e2e-task9-";
+const AUTHORIZATION_DENIAL_CODE = "42501";
 const hasIntegrationEnvironment = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
@@ -323,6 +324,9 @@ test.describe("future diary two-user lifecycle", () => {
     const editResponse = await state.authorPage.goto(appUrl(`/journal/${state.futureId}/edit`));
     expect(editResponse?.status()).toBe(404);
 
+    const { data: authorIdentity, error: authorIdentityError } = await state.authorApi.auth.getUser();
+    expect(authorIdentityError).toBeNull();
+    expect(authorIdentity.user?.id).toBe(state.authorId);
     const { error: updateError } = await state.authorApi
       .from("journal_entries")
       .update({ title: `${futureTitle} mutated` })
@@ -331,8 +335,8 @@ test.describe("future diary two-user lifecycle", () => {
       .from("journal_entries")
       .delete()
       .eq("id", state.futureId);
-    expect(updateError).not.toBeNull();
-    expect(deleteError).not.toBeNull();
+    expect(updateError).toMatchObject({ code: AUTHORIZATION_DENIAL_CODE });
+    expect(deleteError).toMatchObject({ code: AUTHORIZATION_DENIAL_CODE });
     const { data: after, error: afterError } = await state.service
       .from("journal_entries")
       .select("id,title,content,open_at")
