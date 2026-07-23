@@ -3,8 +3,11 @@ import { getMonthCalendarState } from "@/features/calendar/actions";
 import { calculateDistanceKm, getDistanceCopy, type Coordinates } from "@/features/distance/distance";
 import { getDailyInsight } from "@/features/home/daily-insights";
 import { MonthHeatmap } from "@/features/home/components/MonthHeatmap";
+import { FutureDiaryStatusCard, selectHomepageFutureDiary } from "@/features/home/components/FutureDiaryStatusCard";
+import { listFutureDiaryCards } from "@/features/journal/repository";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getChinaDateString } from "@/lib/date/china-day";
 
 function daysBetween(startDate: string, endDate: Date) {
   const start = new Date(`${startDate}T00:00:00+08:00`);
@@ -26,11 +29,20 @@ export default async function HomePage() {
   const { userId, profile } = await requireUser();
   const supabase = await createServerSupabaseClient();
   const now = new Date();
-  const calendarState = await getMonthCalendarState(now.getFullYear(), now.getMonth() + 1);
+  const [chinaYear, chinaMonth] = getChinaDateString(now).split("-").map(Number);
   const dailyInsight = getDailyInsight(now);
 
-  const { data: profiles } = await supabase.from("profiles").select("id, display_name, avatar_url, last_login_latitude, last_login_longitude");
+  const [calendarState, receivedFuture, profileResult] = await Promise.all([
+    getMonthCalendarState(chinaYear, chinaMonth),
+    listFutureDiaryCards(supabase, { userId, box: "received", now }),
+    supabase.from("profiles").select("id, display_name, avatar_url, last_login_latitude, last_login_longitude"),
+  ]);
+  const profiles = profileResult.data;
   const otherProfile = (profiles ?? []).find((item) => String(item.id) !== userId) ?? null;
+  const authorName = otherProfile?.display_name ? String(otherProfile.display_name) : "伴侣";
+  const futureStatus = selectHomepageFutureDiary(receivedFuture
+    .filter((entry) => entry.state === "ready" || entry.state === "waiting")
+    .map((entry) => ({ id: entry.id, authorName, state: entry.state as "ready" | "waiting", openAt: entry.openAt })));
   const { data: latestLetterLocation } = await supabase
     .from("letters")
     .select("latitude, longitude")
@@ -69,6 +81,8 @@ export default async function HomePage() {
         <p className="text-sm tracking-[0.25em] text-[var(--muted-ink)]">今日新知</p>
         <p className="mt-3 text-lg leading-8 text-[var(--ink)]">{dailyInsight}</p>
       </section>
+
+      <FutureDiaryStatusCard entry={futureStatus} />
 
       <MonthHeatmap state={calendarState} />
     </div>

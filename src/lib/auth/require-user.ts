@@ -10,6 +10,7 @@ export type Profile = {
   last_login_latitude: number | null;
   last_login_longitude: number | null;
   relationship_started_on: string;
+  display_preferences: { compactCalendar?: boolean };
   created_at: string;
   updated_at: string;
 };

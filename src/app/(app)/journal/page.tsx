@@ -6,6 +6,8 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 export default async function JournalPage() {
   const [{ userId }, supabase] = await Promise.all([requireUser(), createServerSupabaseClient()]);
   const todayEntries = await listTodayDiaryEntries(supabase);
+  const { data: profiles } = await supabase.from("profiles").select("id, display_name");
+  const authorNames = new Map((profiles ?? []).map((item) => [String(item.id), String(item.display_name)]));
 
   return (
     <div className="grid gap-8">
@@ -24,7 +26,7 @@ export default async function JournalPage() {
                 key={entry.id}
                 href={`/journal/${entry.id}`}
                 title={entry.title}
-                description={`${entry.authorId === userId ? "我" : "对方"}写于 ${entry.entryDate ?? "今天"}`}
+                description={`${entry.authorId === userId ? "我" : (authorNames.get(entry.authorId) ?? "伴侣")}写于 ${entry.entryDate ?? "今天"}`}
                 actionLabel="阅读日记"
               />
             ))}

@@ -20,10 +20,16 @@ export async function updateProfileAction(formData: FormData): Promise<ActionRes
   const { userId } = await requireUser();
   const supabase = await createServerSupabaseClient();
   const displayName = String(formData.get("displayName") ?? "").trim();
+  const relationshipStartedOn = String(formData.get("relationshipStartedOn") ?? "");
+  const compactCalendar = formData.get("compactCalendar") === "on";
   const avatar = formData.get("avatar");
 
   if (displayName.length < 1 || displayName.length > 24) {
     return { ok: false, message: "昵称需要 1 到 24 个字。" };
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(relationshipStartedOn)) {
+    return { ok: false, message: "请选择有效的纪念日。" };
   }
 
   const updatePayload: { display_name: string; avatar_url?: string } = {
@@ -56,7 +62,12 @@ export async function updateProfileAction(formData: FormData): Promise<ActionRes
     updatePayload.avatar_url = data.publicUrl;
   }
 
-  const { error } = await supabase.from("profiles").update(updatePayload).eq("id", userId);
+  const { error } = await supabase.rpc("update_couple_preferences", {
+    p_display_name: updatePayload.display_name,
+    p_avatar_url: updatePayload.avatar_url ?? null,
+    p_relationship_started_on: relationshipStartedOn,
+    p_display_preferences: { compactCalendar },
+  });
 
   if (error) {
     return { ok: false, message: error.message };

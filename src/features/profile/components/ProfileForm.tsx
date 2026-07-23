@@ -20,8 +20,8 @@ export function ProfileForm({ profile }: { profile: Profile }) {
           )}
         </div>
         <div>
-          <p className="text-sm tracking-[0.25em] text-[var(--muted-ink)]">个人资料</p>
-          <h1 className="mt-1 text-2xl font-semibold">昵称和头像</h1>
+          <p className="text-sm tracking-[0.25em] text-[var(--muted-ink)]">设置</p>
+          <h1 className="mt-1 text-2xl font-semibold">我们的私人空间</h1>
         </div>
       </div>
 
@@ -39,6 +39,16 @@ export function ProfileForm({ profile }: { profile: Profile }) {
       <label className="mt-4 block text-sm text-[var(--ink)]">
         上传头像
         <input name="avatar" type="file" accept="image/png,image/jpeg,image/webp" className="mt-2 block w-full text-sm" />
+      </label>
+
+      <label className="mt-4 block text-sm text-[var(--ink)]">
+        在一起的纪念日
+        <input name="relationshipStartedOn" type="date" required defaultValue={profile.relationship_started_on} className="mt-2 w-full rounded-2xl border border-[rgb(71_56_45_/_18%)] bg-white/70 px-4 py-3 outline-none" />
+      </label>
+
+      <label className="mt-4 flex items-center gap-3 text-sm text-[var(--ink)]">
+        <input name="compactCalendar" type="checkbox" defaultChecked={profile.display_preferences?.compactCalendar ?? false} />
+        使用紧凑日历显示
       </label>
 
       <button className="mt-6 rounded-full bg-[var(--ink)] px-5 py-3 text-white" type="submit">

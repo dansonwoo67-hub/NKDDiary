@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/features/profile/actions";
-import { resolveRecurringEventDate } from "@/features/calendar/recurrence";
+import { getChinaDateString } from "@/lib/date/china-day";
 
 export type CalendarEventInput = {
   name: string;
@@ -38,7 +38,7 @@ const RECURRENCE_VALUES = new Set(["none", "monthly", "yearly"]);
 const COLOR_VALUES = new Set(["rose", "gold", "blue", "green", "purple"]);
 
 export async function createCalendarEventAction(input: CalendarEventInput): Promise<ActionResult> {
-  const { userId } = await requireUser();
+  const { spaceId } = await requireUser();
   const supabase = await createServerSupabaseClient();
   const name = input.name.trim();
 
@@ -54,13 +54,13 @@ export async function createCalendarEventAction(input: CalendarEventInput): Prom
     return { ok: false, message: "事件颜色无效。" };
   }
 
-  const { error } = await supabase.from("calendar_events").insert({
-    creator_id: userId,
-    name,
-    event_date: input.eventDate,
-    recurrence: input.recurrence,
-    icon: input.icon,
-    color: input.color,
+  const { error } = await supabase.rpc("create_space_calendar_event", {
+    p_space_id: spaceId,
+    p_name: name,
+    p_event_date: input.eventDate,
+    p_recurrence: input.recurrence,
+    p_icon: input.icon,
+    p_color: input.color,
   });
 
   if (error) {
@@ -68,7 +68,8 @@ export async function createCalendarEventAction(input: CalendarEventInput): Prom
   }
 
   revalidatePath("/");
-  revalidatePath("/write");
+  revalidatePath("/calendar");
+  revalidatePath("/memories");
 
   return { ok: true, message: "事件已记到日历。" };
 }
@@ -83,32 +84,21 @@ export async function createCalendarEventFromForm(formData: FormData) {
   });
 }
 
-function toDateString(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function monthBounds(year: number, month: number) {
-  const start = new Date(year, month - 1, 1);
-  const end = new Date(year, month, 0);
-  return { start, end };
-}
-
 function eventOccurrenceDate(eventDate: string, recurrence: string, year: number, month: number) {
-  const original = new Date(`${eventDate}T00:00:00+08:00`);
+  const [originalYear, originalMonth, originalDay] = eventDate.split("-").map(Number);
+  const targetDay = Math.min(originalDay, new Date(Date.UTC(year, month, 0)).getUTCDate());
+  const occurrence = `${year}-${String(month).padStart(2, "0")}-${String(targetDay).padStart(2, "0")}`;
 
   if (recurrence === "none") {
-    return original.getFullYear() === year && original.getMonth() === month - 1 ? toDateString(original) : null;
+    return originalYear === year && originalMonth === month ? eventDate : null;
   }
 
   if (recurrence === "monthly") {
-    return toDateString(resolveRecurringEventDate(original, year, month - 1));
+    return occurrence;
   }
 
-  if (recurrence === "yearly" && original.getMonth() === month - 1) {
-    return toDateString(resolveRecurringEventDate(original, year, month - 1));
+  if (recurrence === "yearly" && originalMonth === month) {
+    return occurrence;
   }
 
   return null;
@@ -125,15 +115,15 @@ async function ensureTodayEventNotifications(events: Array<{ id: string; name: s
 }
 
 export async function getMonthCalendarState(year: number, month: number): Promise<MonthCalendarState> {
-  await requireUser();
+  const { spaceId } = await requireUser();
   const supabase = await createServerSupabaseClient();
-  const { start, end } = monthBounds(year, month);
-  const startDate = toDateString(start);
-  const endDate = toDateString(end);
+  const dayCount = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const startDate = `${year}-${String(month).padStart(2, "0")}-01`;
+  const endDate = `${year}-${String(month).padStart(2, "0")}-${dayCount}`;
 
   const [{ data: letters, error: lettersError }, { data: events, error: eventsError }] = await Promise.all([
-    supabase.from("letters").select("letter_date").gte("letter_date", startDate).lte("letter_date", endDate),
-    supabase.from("calendar_events").select("id, name, event_date, recurrence, icon, color").order("event_date", { ascending: true }),
+    supabase.from("journal_entries").select("entry_date").eq("space_id", spaceId).eq("entry_type", "today").gte("entry_date", startDate).lte("entry_date", endDate),
+    supabase.from("calendar_events").select("id, name, event_date, recurrence, icon, color").eq("space_id", spaceId).order("event_date", { ascending: true }),
   ]);
 
   if (lettersError) throw new Error(lettersError.message);
@@ -141,12 +131,12 @@ export async function getMonthCalendarState(year: number, month: number): Promis
 
   const recordCounts = new Map<string, number>();
   for (const letter of letters ?? []) {
-    const key = String(letter.letter_date);
+    const key = String(letter.entry_date);
     recordCounts.set(key, (recordCounts.get(key) ?? 0) + 1);
   }
 
   const eventsByDate = new Map<string, CalendarEventChip[]>();
-  const today = toDateString(new Date());
+  const today = getChinaDateString();
   const dueToday: Array<{ id: string; name: string; eventDate: string }> = [];
 
   for (const event of events ?? []) {
@@ -169,8 +159,8 @@ export async function getMonthCalendarState(year: number, month: number): Promis
   await ensureTodayEventNotifications(dueToday);
 
   const days: MonthCalendarDay[] = [];
-  for (let day = 1; day <= end.getDate(); day += 1) {
-    const date = toDateString(new Date(year, month - 1, day));
+  for (let day = 1; day <= dayCount; day += 1) {
+    const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     days.push({
       date,
       dayOfMonth: day,

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { requireUser } from "@/lib/auth/require-user";
 import { signOutAction } from "@/features/auth/actions";
 import { NotificationBell } from "@/features/notifications/components/NotificationBell";
-import { getChinaDateString } from "@/lib/date/china-day";
+import { APP_NAVIGATION } from "@/features/home/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -16,15 +16,6 @@ export default function AppLayout({
 
 async function AuthenticatedAppLayout({ children }: { children: React.ReactNode }) {
   const { profile } = await requireUser();
-  const today = getChinaDateString();
-  const navigation = [
-    { href: "/", label: "首页" },
-    { href: "/write", label: "日记" },
-    { href: `/letters/${today}`, label: "回忆" },
-    { href: "/calendar", label: "日历" },
-    { href: "/", label: "心情" },
-    { href: "/settings", label: "设置" },
-  ];
 
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-6">
@@ -33,7 +24,7 @@ async function AuthenticatedAppLayout({ children }: { children: React.ReactNode 
           NKD Diary
         </Link>
         <div className="flex flex-wrap items-center gap-2">
-          {navigation.map((item) => (
+          {APP_NAVIGATION.map((item) => (
             <Link key={item.label} href={item.href} className="rounded-full px-3 py-1.5 transition hover:bg-white/80">
               {item.label}
             </Link>
