@@ -13,7 +13,8 @@ diaries remain non-interactive for both author and recipient.
   edit/delete window.
 - Added stable `body`-block annotations with code-point offsets, stored quotes,
   replies, safe React text rendering, cross-block rejection, Escape dismissal,
-  and pointer/keyboard selection handling without suppressing native selection.
+  and a two-phase pointer/keyboard selection state machine without suppressing
+  intermediate native selection.
 - Added `journal_comments`, `journal_annotations`, and journal
   `annotation_replies`, all with `space_id`, RLS, identity triggers, and narrow
   security-definer mutation RPCs. Raw authenticated mutations are revoked.
@@ -35,17 +36,20 @@ diaries remain non-interactive for both author and recipient.
 - Interaction rules: missing-module RED, then 6 passing tests.
 - Migration contracts: 5 expected RED failures, then GREEN; later security
   review regressions for cross-space row binding and caller identity were each
-  observed RED before their fixes.
+  observed RED before their fixes. A second review added RED contracts for
+  cross-space direct legacy-notification calls, normalized database length
+  enforcement, and active-space-only calendar recipients before those fixes.
 - Server actions: missing-module RED, then 6 passing action tests.
-- Comment and annotation UI: missing-component RED, then 3 passing tests.
+- Comment and annotation UI: missing-component RED, then passing component
+  tests; the second review added six observed RED selection-state regressions
+  covering intermediate selection, final commits, touch, focus, and keyboard.
 - Journal reader integration and notification routing were observed failing for
   the new behavior before implementation.
 
 ## Verification
 
-- Focused interaction/reader/notification/migration suite: PASS (41 tests at
-  the initial combined gate; expanded contracts included in the full suite).
-- Full `npm test`: PASS — 30 files, 175 tests after independent-review fixes.
+- Focused second-review component/migration suite: PASS — 2 files, 33 tests.
+- Full `npm test`: PASS — 30 files, 181 tests.
 - `npm run lint`: PASS — no errors or warnings.
 - `npm run build`: PASS.
 - `git diff --check`: PASS.
@@ -60,7 +64,7 @@ diaries remain non-interactive for both author and recipient.
 
 ## Independent review remediation
 
-Follow-up hardening completed after the first Task 7 review:
+Follow-up hardening completed after two Task 7 reviews:
 
 - Removed the legacy authenticated notification INSERT policy and table grant
   before introducing the future-open enum value. Existing annotation, reply,
@@ -71,13 +75,18 @@ Follow-up hardening completed after the first Task 7 review:
   constraint is equivalent to the notification enum type. The partial unique
   index is now strictly `(recipient_id, type, source_id)` for that type and no
   longer depends on title text. The open RPC always sets the discriminator.
-- Added authoritative database comment enforcement. A documented PostgreSQL
-  grapheme counter handles combining marks, variation selectors, emoji skin
-  tones, regional-indicator pairs, tag characters, CRLF, and ZWJ sequences;
-  both the table CHECK and create/update RPCs enforce at most 200. Therefore a
-  direct RPC call with 201 ASCII characters is rejected independently of the
-  Next.js action.
-- Added two-way cross-block tests, a focusable/labelled body block, an explicit
-  keyboard action, dialog focus transfer, document `selectionchange` fallback,
-  outside-selection filtering, and verification that native selection events
-  are not cancelled.
+- Tightened the legacy notification RPC to resolve exactly one active space for
+  the caller and every legacy source actor. It rejects mismatched/non-unique
+  source and recipient membership, and calendar recipients now come only from
+  active `space_members` in that caller space rather than all profiles.
+- Replaced the handwritten grapheme approximation with the conservative
+  database rule `char_length(normalize(body, NFC)) <= 200` in the table CHECK
+  and both mutation RPCs. Regression vectors cover 201 ASCII code points,
+  repeated ZWJ input, and a leading combining mark; the client retains its
+  friendlier `Intl.Segmenter` validation.
+- `selectionchange` now only records a candidate ref. Document `pointerup` and
+  `keyup` perform the final commit; touch waits for a quiet period and exposes a
+  non-focus-stealing “添加评注” button. A readonly accessible textarea provides
+  a real keyboard selection range, and closing the dialog restores focus to the
+  originating body control. Both cross-block directions and external
+  selections remain covered.

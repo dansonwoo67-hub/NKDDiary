@@ -273,6 +273,40 @@ describe("private journal image storage migration", () => {
     }
   });
 
+  it("rejects direct legacy notification RPC calls whose source or recipient is outside the caller's unique active space", () => {
+    const migration = readMigration();
+    const helperStart = migration.indexOf("create or replace function public.resolve_single_active_space");
+    const helperEnd = migration.indexOf("\n$$;", helperStart);
+    const helper = migration.slice(helperStart, helperEnd);
+    const legacyStart = migration.indexOf("create or replace function public.create_legacy_notification");
+    const legacyEnd = migration.indexOf("\n$$;", legacyStart);
+    const legacy = migration.slice(legacyStart, legacyEnd);
+
+    expect(helperStart).toBeGreaterThanOrEqual(0);
+    expect(helper).toContain("from public.space_members as member");
+    expect(helper).toContain("member.user_id = p_user_id");
+    expect(helper).toContain("member.active");
+    expect(helper).toContain("if v_match_count <> 1");
+    expect(legacy).toContain("v_space_id := public.resolve_single_active_space(v_actor_id)");
+    expect(legacy).toContain("public.resolve_single_active_space(v_source_actor_id) is distinct from v_space_id");
+    expect(legacy).toContain("public.resolve_single_active_space(v_recipient_id) is distinct from v_space_id");
+    expect(legacy).toContain("raise exception 'legacy notification source is outside caller space'");
+    expect(legacy).toContain("raise exception 'legacy notification recipient is outside caller space'");
+  });
+
+  it("derives calendar recipients only from active members of the caller's space", () => {
+    const migration = readMigration();
+    const start = migration.indexOf("create or replace function public.create_legacy_notification");
+    const end = migration.indexOf("\n$$;", start);
+    const definition = migration.slice(start, end);
+
+    expect(definition).toContain("from public.space_members as member");
+    expect(definition).toContain("member.space_id = v_space_id");
+    expect(definition).toContain("member.active");
+    expect(definition).toContain("member.user_id <> v_actor_id");
+    expect(definition).not.toMatch(/for\s+v_recipient_id\s+in[\s\S]*?from\s+public\.profiles/);
+  });
+
   it("deduplicates future-open notifications by recipient, type, and source without title dependence", () => {
     const migration = readMigration();
     const indexStart = migration.indexOf("create unique index notifications_recipient_type_source_key");
@@ -291,14 +325,18 @@ describe("private journal image storage migration", () => {
     expect(open).not.toMatch(/on conflict[\s\S]*where title/);
   });
 
-  it("enforces the 200-grapheme comment limit in the database entry points", () => {
+  it("conservatively enforces a normalized 200-codepoint comment limit in every database entry point", () => {
     const migration = readMigration();
-    expect(migration).toContain("create or replace function public.journal_visible_grapheme_count");
-    expect(migration).toContain("journal_visible_grapheme_count(btrim(body)) <= 200");
+    expect(migration).not.toContain("journal_visible_grapheme_count");
+    expect(migration).toContain("char_length(normalize(btrim(body), nfc)) <= 200");
     for (const name of ["create_journal_comment", "update_journal_comment"]) {
       const start = migration.indexOf(`create or replace function public.${name}`);
       const end = migration.indexOf("\n$$;", start);
-      expect(migration.slice(start, end)).toContain("public.journal_visible_grapheme_count(btrim(p_body)) > 200");
+      expect(migration.slice(start, end)).toContain("char_length(normalize(btrim(p_body), nfc)) > 200");
     }
+
+    expect(Array.from("a".repeat(201).normalize("NFC"))).toHaveLength(201);
+    expect(Array.from("a\u200db".repeat(67).normalize("NFC"))).toHaveLength(201);
+    expect(Array.from(("\u0301" + "a".repeat(200)).normalize("NFC"))).toHaveLength(201);
   });
 });

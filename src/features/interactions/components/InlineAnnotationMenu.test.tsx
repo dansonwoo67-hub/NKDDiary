@@ -15,6 +15,7 @@ describe("InlineAnnotationMenu", () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it("renders saved body highlights and replies as text nodes", () => {
@@ -65,7 +66,8 @@ describe("InlineAnnotationMenu", () => {
       removeAllRanges: vi.fn(),
     } as unknown as Selection);
 
-    fireEvent.mouseUp(body!);
+    document.dispatchEvent(new Event("selectionchange"));
+    fireEvent.pointerUp(document, { pointerType: "mouse" });
 
     expect(screen.getByRole("status")).toHaveTextContent("请在同一段文字中选择内容");
   });
@@ -88,16 +90,17 @@ describe("InlineAnnotationMenu", () => {
       removeAllRanges: vi.fn(),
     } as unknown as Selection);
 
-    fireEvent.mouseUp(body!);
+    document.dispatchEvent(new Event("selectionchange"));
+    fireEvent.pointerUp(document, { pointerType: "mouse" });
     expect(screen.getByRole("status")).toHaveTextContent("请在同一段文字中选择内容");
   });
 
-  it("offers a keyboard action and moves focus into the annotation dialog", async () => {
+  it("records an intermediate selectionchange without showing or focusing UI", () => {
     const { container } = render(
       <InlineAnnotationMenu entryId="11111111-1111-4111-8111-111111111111" content="正文" annotations={[]} />,
     );
     const body = container.querySelector('[data-block-id="body"]')!;
-    expect(body).toHaveAttribute("tabindex", "0");
+    (body as HTMLElement).focus();
     const textNode = body.firstChild?.firstChild;
     const prefix = { selectNodeContents: vi.fn(), setEnd: vi.fn(), toString: () => "" };
     vi.spyOn(window, "getSelection").mockReturnValue({
@@ -110,13 +113,39 @@ describe("InlineAnnotationMenu", () => {
       removeAllRanges: vi.fn(),
     } as unknown as Selection);
 
-    fireEvent.click(screen.getByRole("button", { name: "评注选中文字" }));
+    document.dispatchEvent(new Event("selectionchange"));
 
-    const input = await screen.findByLabelText("评注");
-    await waitFor(() => expect(input).toHaveFocus());
+    expect(screen.queryByRole("dialog", { name: "添加划线评注" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "添加评注" })).not.toBeInTheDocument();
+    expect(body).toHaveFocus();
   });
 
-  it("ignores selections wholly outside the body block", async () => {
+  it.each(["pointerup", "keyup"])("commits a candidate on document %s", async (eventName) => {
+    const { container } = render(
+      <InlineAnnotationMenu entryId="11111111-1111-4111-8111-111111111111" content="正文" annotations={[]} />,
+    );
+    const body = container.querySelector('[data-block-id="body"]')!;
+    const textNode = body.firstChild?.firstChild;
+    const prefix = { selectNodeContents: vi.fn(), setEnd: vi.fn(), toString: () => "" };
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textNode,
+      focusNode: textNode,
+      rangeCount: 1,
+      getRangeAt: () => ({ startContainer: textNode, startOffset: 0, toString: () => "正文", cloneRange: () => prefix }),
+      toString: () => "正文",
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection);
+
+    document.dispatchEvent(new Event("selectionchange"));
+    if (eventName === "pointerup") fireEvent.pointerUp(document, { pointerType: "mouse" });
+    else fireEvent.keyUp(document, { key: "Shift" });
+
+    expect(await screen.findByRole("dialog", { name: "添加划线评注" })).toBeVisible();
+    await waitFor(() => expect(screen.getByLabelText("评注")).toHaveFocus());
+  });
+
+  it("ignores selections wholly outside the body block after final commit", () => {
     const { container } = render(
       <div>
         <p id="outside">页面其他文字</p>
@@ -132,12 +161,47 @@ describe("InlineAnnotationMenu", () => {
       removeAllRanges: vi.fn(),
     } as unknown as Selection);
 
-    await act(async () => document.dispatchEvent(new Event("selectionchange")));
+    document.dispatchEvent(new Event("selectionchange"));
+    fireEvent.pointerUp(document, { pointerType: "mouse" });
     expect(getSelection).toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("uses selectionchange as a mobile fallback without cancelling native selection", async () => {
+  it("shows a non-focus-stealing touch trigger only after a quiet period", () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <InlineAnnotationMenu entryId="11111111-1111-4111-8111-111111111111" content="正文" annotations={[]} />,
+    );
+    const body = container.querySelector('[data-block-id="body"]')!;
+    (body as HTMLElement).focus();
+    const textNode = body.firstChild?.firstChild;
+    const prefix = { selectNodeContents: vi.fn(), setEnd: vi.fn(), toString: () => "" };
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      anchorNode: textNode,
+      focusNode: textNode,
+      rangeCount: 1,
+      getRangeAt: () => ({ startContainer: textNode, startOffset: 0, toString: () => "正文", cloneRange: () => prefix }),
+      toString: () => "正文",
+      removeAllRanges: vi.fn(),
+    } as unknown as Selection);
+
+    const event = new Event("selectionchange", { cancelable: true });
+    document.dispatchEvent(event);
+    fireEvent.pointerUp(document, { pointerType: "touch" });
+
+    expect(screen.queryByRole("button", { name: "添加评注" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByRole("button", { name: "添加评注" })).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(body).toHaveFocus();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("opens the touch candidate only when its trigger is activated", () => {
+    vi.useFakeTimers();
     const { container } = render(
       <InlineAnnotationMenu entryId="11111111-1111-4111-8111-111111111111" content="正文" annotations={[]} />,
     );
@@ -153,11 +217,30 @@ describe("InlineAnnotationMenu", () => {
       toString: () => "正文",
       removeAllRanges: vi.fn(),
     } as unknown as Selection);
+    document.dispatchEvent(new Event("selectionchange"));
+    fireEvent.pointerUp(document, { pointerType: "touch" });
+    act(() => vi.advanceTimersByTime(400));
 
-    const event = new Event("selectionchange", { cancelable: true });
-    document.dispatchEvent(event);
+    fireEvent.click(screen.getByRole("button", { name: "添加评注" }));
+
+    expect(screen.getByRole("dialog", { name: "添加划线评注" })).toBeVisible();
+    expect(screen.getByLabelText("评注")).toHaveFocus();
+  });
+
+  it("supports real keyboard selection and restores focus when the dialog closes", async () => {
+    render(
+      <InlineAnnotationMenu entryId="11111111-1111-4111-8111-111111111111" content="今天散步" annotations={[]} />,
+    );
+    const keyboardBody = screen.getByLabelText("键盘选择日记正文") as HTMLTextAreaElement;
+    keyboardBody.focus();
+    keyboardBody.setSelectionRange(0, 2);
+    fireEvent.select(keyboardBody);
+
+    fireEvent.keyUp(document, { key: "Shift" });
 
     expect(await screen.findByRole("dialog", { name: "添加划线评注" })).toBeVisible();
-    expect(event.defaultPrevented).toBe(false);
+    await waitFor(() => expect(screen.getByLabelText("评注")).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(keyboardBody).toHaveFocus());
   });
 });
