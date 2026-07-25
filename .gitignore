@@ -11,4 +11,7 @@ build/
 coverage/
 playwright-report/
 test-results/
+.reference/
 *.log
+
+desktop.ini

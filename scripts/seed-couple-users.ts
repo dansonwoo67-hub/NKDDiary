@@ -61,6 +61,40 @@ async function findUserByEmail(email: string) {
   return data.users.find((user) => user.email === email) ?? null;
 }
 
+async function ensurePrivateSpace() {
+  const relationshipStartedOn = process.env.NEXT_PUBLIC_RELATIONSHIP_START_DATE ?? "2024-01-01";
+
+  const { data: existingSpace, error: existingSpaceError } = await supabase
+    .from("spaces")
+    .select("id")
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingSpaceError) {
+    throw existingSpaceError;
+  }
+
+  if (existingSpace) {
+    return String(existingSpace.id);
+  }
+
+  const { data: createdSpace, error: createSpaceError } = await supabase
+    .from("spaces")
+    .insert({
+      site_name: process.env.NEXT_PUBLIC_SITE_NAME ?? "NKD Diary",
+      relationship_started_on: relationshipStartedOn,
+    })
+    .select("id")
+    .single();
+
+  if (createSpaceError) {
+    throw createSpaceError;
+  }
+
+  return String(createdSpace.id);
+}
+
 async function upsertUser(email: string, password: string, displayName: string, loginName: string) {
   const { data: created, error: createError } = await supabase.auth.admin.createUser({
     email,
@@ -98,22 +132,41 @@ async function upsertUser(email: string, password: string, displayName: string, 
   if (profileError) {
     throw profileError;
   }
+
+  return userId;
+}
+
+async function ensureSpaceMember(spaceId: string, userId: string, role: "owner" | "member") {
+  const { error } = await supabase.from("space_members").upsert({
+    space_id: spaceId,
+    user_id: userId,
+    role,
+    is_active: true,
+  });
+
+  if (error) {
+    throw error;
+  }
 }
 
 async function main() {
-  await upsertUser(
+  const userAId = await upsertUser(
     process.env.COUPLE_USER_A_EMAIL!,
     process.env.COUPLE_USER_A_PASSWORD!,
     process.env.COUPLE_USER_A_DISPLAY_NAME!,
     "user_a",
   );
 
-  await upsertUser(
+  const userBId = await upsertUser(
     process.env.COUPLE_USER_B_EMAIL!,
     process.env.COUPLE_USER_B_PASSWORD!,
     process.env.COUPLE_USER_B_DISPLAY_NAME!,
     "user_b",
   );
+
+  const spaceId = await ensurePrivateSpace();
+  await ensureSpaceMember(spaceId, userAId, "owner");
+  await ensureSpaceMember(spaceId, userBId, "member");
 }
 
 main().catch((error) => {

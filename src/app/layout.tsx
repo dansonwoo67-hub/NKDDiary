@@ -4,6 +4,10 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "NKD Diary",
   description: "A private two-person couple diary.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function RootLayout({
