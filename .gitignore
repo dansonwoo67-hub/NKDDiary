@@ -14,3 +14,4 @@ test-results/
 *.log
 lint-report.txt
 *.tsbuildinfo
+.vercel/
