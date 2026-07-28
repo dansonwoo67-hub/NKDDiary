@@ -11,6 +11,7 @@ import {
   updatePartnerNicknameAction,
 } from "@/lib/settings-actions";
 import { getSettingsFeedback } from "@/features/settings/feedback";
+import { calculateRelationshipDays } from "@/lib/date/relationship-days";
 
 export function SettingsPageClient({
   profile: initialProfile,
@@ -221,12 +222,7 @@ export function SettingsPageClient({
     });
   };
   
-  const calculateDays = (startDate: string): number => {
-    const start = new Date(startDate);
-    const now = new Date();
-    const diff = now.getTime() - start.getTime();
-    return Math.floor(diff / (1000 * 60 * 60 * 24));
-  };
+  const calculateDays = (startDate: string): number => calculateRelationshipDays(startDate);
   
   const spaceNameRequest = settings.pendingRequests.find(r => r.setting_type === "space_name");
   const dateRequest = settings.pendingRequests.find(r => r.setting_type === "relationship_started_on");
