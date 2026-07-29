@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { MonthCalendarState, MonthCalendarDay } from "@/features/calendar/types";
 import { getDateInfo } from "@/lib/date/chinese-calendar";
+import { getTodayDateStr } from "@/lib/date/relationship-days";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 interface MonthViewProps {
@@ -26,7 +27,7 @@ const EVENT_TYPE_ICONS: Record<string, string> = {
 export function MonthView({ state, onMonthChange, onDayClick, selectedDate }: MonthViewProps) {
   const [hoveredDay, setHoveredDay] = useState<string | null>(null);
   
-  const today = new Date().toISOString().split("T")[0];
+  const today = getTodayDateStr();
   
   const getDaysInMonth = (year: number, month: number) => {
     return new Date(year, month, 0).getDate();

@@ -1,5 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
-import { calculateRelationshipDays } from "./relationship-days";
+import { calculateRelationshipDays, getTodayDateStr } from "./relationship-days";
+
+describe("getTodayDateStr", () => {
+  it("returns Shanghai timezone date, not UTC date", () => {
+    vi.useFakeTimers();
+    // 2026-07-29 23:30 UTC = 2026-07-30 07:30 Shanghai
+    vi.setSystemTime(new Date("2026-07-29T23:30:00Z"));
+    expect(getTodayDateStr()).toBe("2026-07-30");
+    vi.useRealTimers();
+  });
+
+  it("pads month and day to two digits", () => {
+    vi.useFakeTimers();
+    // 2026-01-05 00:00 UTC = 2026-01-05 08:00 Shanghai
+    vi.setSystemTime(new Date("2026-01-05T00:00:00Z"));
+    expect(getTodayDateStr()).toBe("2026-01-05");
+    vi.useRealTimers();
+  });
+});
 
 describe("calculateRelationshipDays", () => {
   it("counts the start date as day 1", () => {

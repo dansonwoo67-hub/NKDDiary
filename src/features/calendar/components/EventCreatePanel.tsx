@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createCalendarEventAction } from "@/features/calendar/actions";
 import type { CalendarEventInput } from "@/features/calendar/types";
 import type { CalendarMemoryType } from "@/features/memories/rules";
+import { getTodayDateStr } from "@/lib/date/relationship-days";
 import { X, Gift, MapPin, Repeat } from "lucide-react";
 
 interface EventCreatePanelProps {
@@ -33,7 +34,7 @@ export function EventCreatePanel({ defaultDate, onClose, onSuccess }: EventCreat
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<CalendarEventInput>>({
     name: "",
-    eventDate: defaultDate || new Date().toISOString().split("T")[0],
+    eventDate: defaultDate || getTodayDateStr(),
     recurrence: "none",
     isImportant: false,
     color: "rose",

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { YearCalendarState, YearCalendarDay } from "@/features/calendar/types";
+import { getTodayDateStr } from "@/lib/date/relationship-days";
 import { ChevronLeft, ChevronRight, Star } from "lucide-react";
 
 interface YearViewProps {
@@ -15,7 +16,7 @@ const MONTHS = ["一月", "二月", "三月", "四月", "五月", "六月", "七
 export function YearView({ state, onYearChange, onDayClick }: YearViewProps) {
   const [hoveredDay, setHoveredDay] = useState<string | null>(null);
   
-  const today = new Date().toISOString().split("T")[0];
+  const today = getTodayDateStr();
   
   const getDaysByMonth = () => {
     const months: YearCalendarDay[][] = [];

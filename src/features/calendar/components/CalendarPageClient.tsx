@@ -10,6 +10,7 @@ import { MonthView } from "./MonthView";
 import { YearView } from "./YearView";
 import { DayDetailDrawer } from "./DayDetailDrawer";
 import { EventCreatePanel } from "./EventCreatePanel";
+import { getTodayDateStr } from "@/lib/date/relationship-days";
 import { Plus, CalendarDays, Calendar, Sparkles } from "lucide-react";
 
 export type ViewType = "month" | "year";
@@ -188,11 +189,11 @@ export function CalendarPageClient() {
   
   const upcomingEvents = monthState?.days
     .flatMap(d => d.events.map(e => ({ ...e, date: d.date })))
-    .filter(e => e.date >= new Date().toISOString().split("T")[0])
+    .filter(e => e.date >= getTodayDateStr())
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 2) ?? [];
   
-  const today = new Date().toISOString().split("T")[0];
+  const today = getTodayDateStr();
   const daysWithContent = monthState?.days.filter(d => {
     const letters = d.letters ?? [];
     const content = d.content ?? [];

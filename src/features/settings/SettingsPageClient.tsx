@@ -11,7 +11,7 @@ import {
   updatePartnerNicknameAction,
 } from "@/lib/settings-actions";
 import { getSettingsFeedback } from "@/features/settings/feedback";
-import { calculateRelationshipDays } from "@/lib/date/relationship-days";
+import { calculateRelationshipDays, getTodayDateStr } from "@/lib/date/relationship-days";
 
 export function SettingsPageClient({
   profile: initialProfile,
@@ -186,7 +186,7 @@ export function SettingsPageClient({
   };
   
   const handleCreateDateRequest = () => {
-    if (dateValue > new Date().toISOString().split("T")[0]) return;
+    if (dateValue > getTodayDateStr()) return;
     if (dateValue === settings.relationshipStartedOn) return;
     
     const formData = new FormData();
@@ -430,12 +430,12 @@ export function SettingsPageClient({
                   type="date"
                   value={dateValue}
                   onChange={(e) => setDateValue(e.target.value)}
-                  max={new Date().toISOString().split("T")[0]}
+                  max={getTodayDateStr()}
                   className="flex-1 px-4 py-3 bg-white border border-[var(--muted-ink)]/10 rounded-xl text-sm focus:outline-none focus:border-[var(--rose)]/30 transition"
                 />
                 <button
                   onClick={handleCreateDateRequest}
-                  disabled={dateValue > new Date().toISOString().split("T")[0] || dateValue === settings.relationshipStartedOn}
+                  disabled={dateValue > getTodayDateStr() || dateValue === settings.relationshipStartedOn}
                   className="px-4 py-3 bg-[var(--rose)]/10 text-[var(--rose)] rounded-xl text-sm hover:bg-[var(--rose)]/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   邀请确认
