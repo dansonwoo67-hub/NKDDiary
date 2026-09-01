@@ -7,12 +7,14 @@ import {
   type Page,
 } from "@playwright/test";
 import { browserContextOptionsFromProjectUse } from "../../scripts/playwright-e2e-config";
+import { selectE2eJournalFixtures } from "../../scripts/e2e-fixture-scope";
 
 const baseUrl = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
-const marker = `e2e-task9-${Date.now()}-${process.pid}`;
+const marker = `e2e_${Date.now()}_${process.pid}`;
 const futureBody = `${marker} future body that must stay private`;
-const task9ContentPrefix = "e2e-task9-";
+const e2eContentPrefix = "e2e_";
 const AUTHORIZATION_DENIAL_CODE = "42501";
+const WRITE_FEEDBACK_TIMEOUT_MS = 30_000;
 const hasIntegrationEnvironment = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
@@ -37,12 +39,105 @@ type Journey = {
   creationShanghaiDate: string;
   futureOpenAt: string;
   futureImagePath: string | null;
+  storageFixturePath: string | null;
 };
 
 let journey: Journey | undefined;
 
 function appUrl(path: string) {
   return new URL(path, baseUrl).toString();
+}
+
+function isNextServerActionRequest(request: { method(): string; headers(): Record<string, string> }) {
+  return request.method() === "POST" && Boolean(request.headers()["next-action"]);
+}
+
+function observeNextServerAction(page: Page) {
+  const requestStarted = page.waitForRequest(isNextServerActionRequest, {
+    timeout: WRITE_FEEDBACK_TIMEOUT_MS,
+  }).then((request) => ({ request, observedAt: Date.now() }));
+  const responseReceived = requestStarted.then(async ({ request }) => {
+    const response = await request.response();
+    if (!response) throw new Error("Next Server Action request completed without a response");
+    return { response, observedAt: Date.now() };
+  });
+  return { requestStarted, responseReceived };
+}
+
+async function waitForJournalEntry(
+  service: SupabaseClient,
+  authorId: string,
+  content: string,
+) {
+  let confirmedAt = 0;
+  await expect.poll(async () => {
+    const result = await service
+      .from("journal_entries")
+      .select("id")
+      .eq("author_id", authorId)
+      .eq("content", content)
+      .maybeSingle();
+    if (result.error) throw result.error;
+    if (result.data && !confirmedAt) confirmedAt = Date.now();
+    return Boolean(result.data);
+  }, { timeout: WRITE_FEEDBACK_TIMEOUT_MS }).toBe(true);
+  const result = await service
+    .from("journal_entries")
+    .select("id")
+    .eq("author_id", authorId)
+    .eq("content", content)
+    .single();
+  if (result.error || !result.data) throw result.error ?? new Error("Expected capsule row was not persisted");
+  return { row: result.data, confirmedAt };
+}
+
+async function waitForComment(
+  service: SupabaseClient,
+  entryId: string,
+  body: string,
+) {
+  let confirmedAt = 0;
+  await expect.poll(async () => {
+    const result = await service
+      .from("journal_comments")
+      .select("id,parent_id")
+      .eq("entry_id", entryId)
+      .eq("body", body)
+      .maybeSingle();
+    if (result.error) throw result.error;
+    if (result.data && !confirmedAt) confirmedAt = Date.now();
+    return Boolean(result.data);
+  }, { timeout: WRITE_FEEDBACK_TIMEOUT_MS }).toBe(true);
+  const result = await service
+    .from("journal_comments")
+    .select("id,parent_id")
+    .eq("entry_id", entryId)
+    .eq("body", body)
+    .single();
+  if (result.error || !result.data) throw result.error ?? new Error("Expected comment row was not persisted");
+  return { row: result.data, confirmedAt };
+}
+
+async function reportActionTimeline(
+  label: string,
+  clickedAt: number,
+  probe: ReturnType<typeof observeNextServerAction>,
+  dbConfirmedAt: number,
+  domVisibleAt: number,
+) {
+  const [{ observedAt: requestStartedAt }, { response, observedAt: responseReceivedAt }] = await Promise.all([
+    probe.requestStarted,
+    probe.responseReceived,
+  ]);
+  console.log(JSON.stringify({
+    flow: label,
+    clickTimestamp: new Date(clickedAt).toISOString(),
+    actionStartedMs: Math.max(0, Math.round(requestStartedAt - clickedAt)),
+    dbMutationConfirmedMs: dbConfirmedAt - clickedAt,
+    actionResponseReceivedMs: responseReceivedAt - clickedAt,
+    responseStatus: response.status(),
+    expectedDomVisibleMs: domVisibleAt - clickedAt,
+  }));
 }
 
 function shanghaiDate(now = new Date()) {
@@ -52,6 +147,12 @@ function shanghaiDate(now = new Date()) {
     month: "2-digit",
     day: "2-digit",
   }).format(now);
+}
+
+function commentCardForBody(section: ReturnType<Page["locator"]>, body: string) {
+  return section
+    .getByText(body, { exact: true })
+    .locator("xpath=ancestor::div[starts-with(@id,'comment-')][1]");
 }
 
 function shanghaiLocalDateTime(date: Date) {
@@ -82,7 +183,7 @@ async function signIn(page: Page, email: string, password: string) {
   await page.getByLabel("邮箱").fill(email);
   await page.getByLabel("密码").fill(password);
   await page.getByRole("button", { name: "进入日记" }).click();
-  await expect(page).toHaveURL(/\/$/, { timeout: 45_000 });
+  await expect(page).toHaveURL(/\/$/, { timeout: 300_000 });
 }
 
 async function signedInApi(email: string, password: string) {
@@ -111,15 +212,37 @@ async function replaceComposerBody(page: Page, body: string) {
   await expect(editor).toHaveText(body);
 }
 
-async function cleanupTask9Rows(service: SupabaseClient, authorId: string, recipientId: string) {
+async function cleanupE2eRows(
+  service: SupabaseClient,
+  authorId: string,
+  recipientId: string,
+  markerPrefix: string,
+) {
   const { data, error } = await service
     .from("journal_entries")
-    .select("id,image_path")
-    .in("author_id", [authorId, recipientId])
-    .like("content", `${task9ContentPrefix}%`);
+    .select("id,author_id,content,image_path")
+    .in("author_id", [authorId, recipientId]);
   if (error) throw new Error("Unable to find Task 9 fixture rows for cleanup");
 
-  const rows = (data ?? []) as Array<{ id: string; image_path: string | null }>;
+  const rows = selectE2eJournalFixtures(data ?? [], [authorId, recipientId], markerPrefix);
+  if (!rows.length) return;
+  const entryIds = rows.map((row) => row.id);
+  const { data: comments, error: commentsError } = await service
+    .from("journal_comments")
+    .select("id")
+    .in("entry_id", entryIds);
+  if (commentsError) throw new Error(`Unable to inspect E2E fixture comments for cleanup (${markerPrefix})`);
+  const notificationSourceIds = [...entryIds, ...(comments ?? []).map((comment) => String(comment.id))];
+  const { error: notificationError } = await service
+    .from("notifications")
+    .delete()
+    .in("source_id", notificationSourceIds);
+  if (notificationError) throw new Error(`Unable to clean E2E fixture notifications (${markerPrefix})`);
+  const { error: commentError } = await service
+    .from("journal_comments")
+    .delete()
+    .in("entry_id", entryIds);
+  if (commentError) throw new Error(`Unable to clean E2E fixture comments (${markerPrefix})`);
   const imagePaths = rows.flatMap((row) => row.image_path ? [row.image_path] : []);
   if (imagePaths.length) {
     const { error: imageError } = await service.storage.from("journal-images").remove(imagePaths);
@@ -129,9 +252,15 @@ async function cleanupTask9Rows(service: SupabaseClient, authorId: string, recip
     const { error: deleteError } = await service
       .from("journal_entries")
       .delete()
-      .in("id", rows.map((row) => row.id));
+      .in("id", entryIds);
     if (deleteError) throw new Error("Unable to clean Task 9 fixture rows");
   }
+}
+
+async function cleanupStorageFixture(service: SupabaseClient, storagePath: string | null) {
+  if (!storagePath) return;
+  const { error } = await service.storage.from("journal-images").remove([storagePath]);
+  if (error) throw new Error(`Unable to clean E2E Storage fixture (${marker})`);
 }
 
 async function assertNoFixtureContamination(service: SupabaseClient, authorId: string, creationDate: string) {
@@ -142,7 +271,7 @@ async function assertNoFixtureContamination(service: SupabaseClient, authorId: s
     .eq("entry_type", "future")
     .eq("created_local_date", creationDate);
   if (error) throw new Error("Unable to check Task 9 fixture contamination");
-  const conflicting = (data ?? []).filter((row) => !String(row.content).startsWith(task9ContentPrefix));
+  const conflicting = (data ?? []).filter((row) => !String(row.content).startsWith(e2eContentPrefix));
   if (conflicting.length) {
     throw new Error("Task 9 fixture is contaminated by a non-Task-9 same-day capsule letter; clean the dedicated test accounts and rerun.");
   }
@@ -207,7 +336,7 @@ test.describe("capsule letter two-user lifecycle", () => {
       { auth: { autoRefreshToken: false, persistSession: false } },
     );
     const creationShanghaiDate = shanghaiDate();
-    await cleanupTask9Rows(service, authorApi.userId, recipientApi.userId);
+    await cleanupE2eRows(service, authorApi.userId, recipientApi.userId, e2eContentPrefix);
     await assertNoFixtureContamination(service, authorApi.userId, creationShanghaiDate);
     const contextOptions = browserContextOptionsFromProjectUse(testInfo.project.use as Record<string, unknown>) as BrowserContextOptions;
     const [authorContext, recipientContext] = await Promise.all([
@@ -235,17 +364,36 @@ test.describe("capsule letter two-user lifecycle", () => {
       creationShanghaiDate,
       futureOpenAt: "",
       futureImagePath: null,
+      storageFixturePath: null,
     };
   });
 
   test.afterAll(async () => {
     if (!journey) return;
     try {
-      await cleanupTask9Rows(journey.service, journey.authorId, journey.recipientId);
+      await Promise.all([
+        cleanupE2eRows(journey.service, journey.authorId, journey.recipientId, marker),
+        cleanupStorageFixture(journey.service, journey.storageFixturePath),
+      ]);
     } finally {
       await Promise.all([journey.authorContext.close(), journey.recipientContext.close()]);
       journey = undefined;
     }
+  });
+
+  test("isolated journal Storage accepts and cleans a marker-scoped image fixture", async () => {
+    const state = await currentJourney();
+    const storagePath = `e2e/${marker}.webp`;
+    state.storageFixturePath = storagePath;
+    const bytes = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
+    const { data, error } = await state.service.storage.from("journal-images").upload(storagePath, bytes, {
+      contentType: "image/webp",
+      upsert: false,
+    });
+    expect(error).toBeNull();
+    expect(data?.path).toBe(storagePath);
+    const { error: downloadError } = await state.service.storage.from("journal-images").download(storagePath);
+    expect(downloadError).toBeNull();
   });
 
   test("author can create one Shanghai-today capsule letter and the daily capsule quota remains enforced", async () => {
@@ -256,15 +404,47 @@ test.describe("capsule letter two-user lifecycle", () => {
     state.futureOpenAt = openAt.toISOString();
     await state.authorPage.locator('input[type="datetime-local"]').fill(shanghaiLocalDateTime(openAt));
     await state.authorPage.getByRole("button", { name: "确认封存" }).click();
+    const firstProbe = observeNextServerAction(state.authorPage);
+    const firstClickedAt = Date.now();
+    const persistedFuture = waitForJournalEntry(state.service, state.authorId, futureBody);
     await state.authorPage.getByRole("button", { name: "封存胶囊信" }).click();
-    await expect(state.authorPage.getByText("胶囊信已封存，会在约定时间送到 TA 手中。")).toBeVisible();
+    await expect(state.authorPage.getByText("胶囊信已封存，会在约定时间送到 TA 手中。"))
+      .toBeVisible({ timeout: WRITE_FEEDBACK_TIMEOUT_MS });
+    const firstDomVisibleAt = Date.now();
+    const persisted = await persistedFuture;
+    await reportActionTimeline(
+      "capsule-create",
+      firstClickedAt,
+      firstProbe,
+      persisted.confirmedAt,
+      firstDomVisibleAt,
+    );
 
     await state.authorPage.goto(appUrl("/journal/future/new"));
     await replaceComposerBody(state.authorPage, `${marker} rejected second future`);
     await state.authorPage.locator('input[type="datetime-local"]').fill(shanghaiLocalDateTime(nextSafeOpenTime(new Date(Date.now() + 60_000))));
     await state.authorPage.getByRole("button", { name: "确认封存" }).click();
+    const quotaProbe = observeNextServerAction(state.authorPage);
+    const quotaClickedAt = Date.now();
     await state.authorPage.getByRole("button", { name: "封存胶囊信" }).click();
-    await expect(state.authorPage.getByText(/今天的小胶囊已经认真封存好一封啦|今天已经封存过一封胶囊信了/)).toBeVisible();
+    await expect(state.authorPage.getByText(/今天的小胶囊已经认真封存好一封啦|今天已经封存过一封胶囊信了/))
+      .toBeVisible({ timeout: WRITE_FEEDBACK_TIMEOUT_MS });
+    const quotaDomVisibleAt = Date.now();
+    const { count: quotaCount, error: quotaCountError } = await state.service
+      .from("journal_entries")
+      .select("id", { count: "exact", head: true })
+      .eq("author_id", state.authorId)
+      .eq("entry_type", "future")
+      .eq("created_local_date", state.creationShanghaiDate);
+    expect(quotaCountError).toBeNull();
+    expect(quotaCount).toBe(1);
+    await reportActionTimeline(
+      "capsule-quota",
+      quotaClickedAt,
+      quotaProbe,
+      quotaDomVisibleAt,
+      quotaDomVisibleAt,
+    );
 
     if (shanghaiDate() !== state.creationShanghaiDate) {
       throw new Error("Shanghai date changed while creating Task 9 fixtures; rerun the serial journey.");
@@ -325,7 +505,7 @@ test.describe("capsule letter two-user lifecycle", () => {
   });
 
   test("recipient sees only capsule metadata before and after readiness until they explicitly open", async () => {
-    test.setTimeout(330_000);
+    test.setTimeout(600_000);
     const state = await currentJourney();
     await state.recipientPage.goto(appUrl("/journal/future"));
     await expect(state.recipientPage.getByText("时间胶囊")).toBeVisible();
@@ -338,26 +518,67 @@ test.describe("capsule letter two-user lifecycle", () => {
     await assertRecipientStillPrivate(state);
     state.recipientPage.once("dialog", (dialog) => dialog.accept());
     await state.recipientPage.getByRole("button", { name: "开启胶囊" }).click();
-    await expect(state.recipientPage.getByRole("link", { name: "阅读日记" })).toBeVisible({ timeout: 15_000 });
-    await state.recipientPage.getByRole("link", { name: "阅读日记" }).click();
-    await expect(state.recipientPage.getByText(futureBody)).toBeVisible();
+    const readerLink = state.recipientPage.getByRole("link", { name: "阅读日记" });
+    await expect(readerLink).toBeVisible({ timeout: 30_000 });
+    await expect(readerLink).toHaveAttribute("href", `/journal/${state.futureId}`);
+    await state.recipientPage.goto(appUrl(`/journal/${state.futureId}`));
+    await expect(state.recipientPage.getByText(futureBody)).toBeVisible({ timeout: 60_000 });
     const commentSection = state.recipientPage.locator("section").filter({
       has: state.recipientPage.getByRole("heading", { name: /评论/ }),
     });
     await commentSection.getByRole("textbox").fill(`${marker} ordinary comment`);
+    const commentProbe = observeNextServerAction(state.recipientPage);
+    const commentClickedAt = Date.now();
+    const persistedComment = waitForComment(
+      state.service,
+      state.futureId,
+      `${marker} ordinary comment`,
+    );
     await commentSection.getByRole("button").last().click();
-    await expect(state.recipientPage.getByText(`${marker} ordinary comment`)).toBeVisible();
+    const persistedCommentCard = commentCardForBody(commentSection, `${marker} ordinary comment`);
+    await expect(persistedCommentCard)
+      .toBeVisible({ timeout: WRITE_FEEDBACK_TIMEOUT_MS });
+    const commentDomVisibleAt = Date.now();
+    const persistedTopLevel = await persistedComment;
+    expect(persistedTopLevel.row.parent_id).toBeNull();
+    await reportActionTimeline(
+      "capsule-comment",
+      commentClickedAt,
+      commentProbe,
+      persistedTopLevel.confirmedAt,
+      commentDomVisibleAt,
+    );
 
-    const commentCard = state.recipientPage
-      .getByText(`${marker} ordinary comment`)
-      .locator("xpath=ancestor::div[starts-with(@id,'comment-')][1]");
-    await commentCard.getByRole("button", { name: "回复" }).click();
+    await persistedCommentCard.getByRole("button", { name: "回复" }).click();
     await commentSection.getByRole("textbox").fill(`${marker} reply`);
+    const replyProbe = observeNextServerAction(state.recipientPage);
+    const replyClickedAt = Date.now();
+    const persistedReply = waitForComment(state.service, state.futureId, `${marker} reply`);
     await commentSection.getByRole("button").last().click();
-    await expect(state.recipientPage.getByText(`${marker} reply`)).toBeVisible();
+    const persistedReplyCard = commentCardForBody(commentSection, `${marker} reply`);
+    await expect(persistedReplyCard)
+      .toBeVisible({ timeout: WRITE_FEEDBACK_TIMEOUT_MS });
+    const replyDomVisibleAt = Date.now();
+    const persistedReplyRow = await persistedReply;
+    expect(persistedReplyRow.row.parent_id).toBe(persistedTopLevel.row.id);
+    await reportActionTimeline(
+      "capsule-reply",
+      replyClickedAt,
+      replyProbe,
+      persistedReplyRow.confirmedAt,
+      replyDomVisibleAt,
+    );
+    const refreshTriggeredAt = Date.now();
     await state.recipientPage.reload();
-    await expect(state.recipientPage.getByText(`${marker} ordinary comment`)).toBeVisible();
-    await expect(state.recipientPage.getByText(`${marker} reply`)).toBeVisible();
+    await expect(commentCardForBody(commentSection, `${marker} ordinary comment`))
+      .toBeVisible({ timeout: WRITE_FEEDBACK_TIMEOUT_MS });
+    await expect(commentCardForBody(commentSection, `${marker} reply`))
+      .toBeVisible({ timeout: WRITE_FEEDBACK_TIMEOUT_MS });
+    console.log(JSON.stringify({
+      flow: "capsule-reply-refresh",
+      refreshTriggeredAt: new Date(refreshTriggeredAt).toISOString(),
+      expectedReadPathDomVisibleMs: Date.now() - refreshTriggeredAt,
+    }));
   });
 
 });

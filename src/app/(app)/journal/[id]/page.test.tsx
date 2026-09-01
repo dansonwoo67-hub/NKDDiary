@@ -71,6 +71,7 @@ describe("JournalEntryPage entry-kind routing", () => {
     mockRequireUser.mockResolvedValue({
       userId: legacyEntry.authorId,
       spaceId: legacyEntry.spaceId,
+      email: "user@example.test",
       profile: { display_name: "Susan" } as never,
     });
     mockCreateClient.mockResolvedValue(clientWithNoComments() as never);

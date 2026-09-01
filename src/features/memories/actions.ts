@@ -5,20 +5,13 @@ import { revalidatePath } from "next/cache";
 import type { ActionResult } from "@/features/profile/actions";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { getMemoryDayBounds } from "./day-bounds";
 
 function validMemoryInput(input: { title: string; body: string; occurredOn: string }) {
   const title = input.title.trim();
   const body = input.body.trim();
   if (title.length > 30 || !body || body.length > 150 || !/^\d{4}-\d{2}-\d{2}$/.test(input.occurredOn)) return null;
   return { title: title || "一段回忆", body, occurredOn: input.occurredOn };
-}
-
-function chinaDayBounds() {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-  const start = new Date(`${parts}T00:00:00+08:00`);
-  const end = new Date(start.getTime() + 86_400_000);
-  return { start: start.toISOString(), end: end.toISOString() };
 }
 
 function refreshMemoryViews() {
@@ -41,7 +34,7 @@ export async function createMemoryAction(formData: FormData): Promise<ActionResu
 
   const { userId, spaceId } = await requireUser();
   const supabase = await createServerSupabaseClient();
-  const { start, end } = chinaDayBounds();
+  const { start, end } = getMemoryDayBounds();
   const { count, error: countError } = await supabase
     .from("memory_entries")
     .select("id", { count: "exact", head: true })

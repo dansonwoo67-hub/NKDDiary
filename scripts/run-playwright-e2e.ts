@@ -5,10 +5,10 @@ import process from "node:process";
 import {
   fetchExpectedLoginReadiness,
   hasChildExited,
-  integrationEnvironmentMissing,
-  loadLocalEnv,
+  loadE2eEnv,
   planTreeTermination,
 } from "./playwright-e2e-config";
+import { assertWriteCapableE2eEnvironment } from "./e2e-environment-guard";
 
 const require = createRequire(import.meta.url);
 const nextCli = require.resolve("next/dist/bin/next");
@@ -162,24 +162,16 @@ function stopProcesses() {
 
 async function main() {
   let exitCode = 1;
-  loadLocalEnv();
-  const missingIntegrationEnvironment = integrationEnvironmentMissing();
+  loadE2eEnv();
+  const guard = assertWriteCapableE2eEnvironment();
+  console.log(`Environment: E2E Test\nSupabase Project Ref: ${guard.projectRef}\nProduction: ${guard.production}`);
   const port = await findAvailablePort();
   const baseUrl = `http://${host}:${port}`;
 
   try {
     startServer(port);
     await waitForServer(baseUrl);
-    if (missingIntegrationEnvironment.length) {
-      const smokeExitCode = await runPlaywright(baseUrl, true);
-      console.error(
-        `Task 9 integration journeys are unavailable: missing ${missingIntegrationEnvironment.join(", ")}. `
-        + "Smoke ran separately; this full gate is intentionally failing rather than skipping privacy/quota evidence.",
-      );
-      exitCode = smokeExitCode === 0 ? 1 : smokeExitCode;
-    } else {
-      exitCode = await runPlaywright(baseUrl);
-    }
+    exitCode = await runPlaywright(baseUrl);
   } finally {
     await stopProcesses();
   }

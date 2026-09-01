@@ -6,6 +6,7 @@ import { deleteMemoryFromForm, updateMemoryFromForm } from "@/features/memories/
 import { MemoryComposer } from "@/features/memories/components/MemoryComposer";
 import type { MemoryItem, MemoryFeedKind } from "@/features/memories/repository";
 import { canAuthorMutate } from "@/features/mood/rules";
+import { getTodayInRelationshipTimezone } from "@/lib/date/relationship-date";
 
 type Filter = "all" | MemoryFeedKind | "photos";
 const filters: Array<{ value: Filter; label: string; Icon: typeof Heart }> = [
@@ -285,7 +286,7 @@ export function MemoryTimeline({ items, viewerId, now = new Date() }: { items: M
                 <X size={18} />
               </button>
             </div>
-            <MemoryComposer today={new Date().toISOString().slice(0, 10)} />
+            <MemoryComposer today={getTodayInRelationshipTimezone(now)} onCreated={() => setShowComposer(false)} />
           </div>
         </div>
       ) : null}

@@ -36,11 +36,14 @@ export function parseEnvFile(contents: string): Record<string, string> {
   return values;
 }
 
-export function loadLocalEnv(cwd = process.cwd()) {
-  const envPath = path.join(cwd, ".env.local");
+export function loadE2eEnv(
+  cwd = process.cwd(),
+  environment: E2eEnvironment = process.env,
+) {
+  const envPath = path.join(cwd, ".env.e2e.local");
   if (!existsSync(envPath)) return;
   const values = parseEnvFile(readFileSync(envPath, "utf8"));
-  for (const [key, value] of Object.entries(values)) process.env[key] ??= value;
+  for (const [key, value] of Object.entries(values)) environment[key] ??= value;
 }
 
 export function integrationEnvironmentMissing(environment: E2eEnvironment = process.env): string[] {

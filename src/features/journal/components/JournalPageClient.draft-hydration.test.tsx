@@ -29,12 +29,11 @@ vi.mock("@/lib/supabase/client", () => ({
 }));
 
 const props = {
-  boxes: { sent: [], inbox: [], starred: [] },
+  threads: [],
   partnerId: "partner-1",
   partnerName: "Niki",
   userId: "susan",
   draft: null,
-  unreadLetterIds: [],
 };
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;

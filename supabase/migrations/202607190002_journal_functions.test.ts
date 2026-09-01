@@ -26,8 +26,8 @@ describe("journal lifecycle migration contract", () => {
     const migration = readMigration();
 
     expect(migration).toContain("create or replace function public.list_future_diary_cards");
-    expect(migration).toMatch(/returns table\s*\(\s*id uuid,\s*author_id uuid,\s*recipient_id uuid,\s*sealed_at timestamptz,\s*open_at timestamptz,\s*opened_at timestamptz,\s*created_at timestamptz\s*\)/s);
-    expect(migration).not.toMatch(/returns table\s*\([^)]*(title|content|image_path)/s);
+    expect(migration).toMatch(/returns table\s*\(\s*id uuid,\s*author_id uuid,\s*recipient_id uuid,\s*sealed_at timestamptz,\s*open_at timestamptz,\s*opened_at timestamptz,\s*created_at timestamptz\s*\)/);
+    expect(migration).not.toMatch(/returns table\s*\([^)]*(title|content|image_path)/);
     expect(migration).toContain("grant execute on function public.list_future_diary_cards(text) to authenticated;");
     expect(migration).toContain("revoke insert, update, delete on table public.journal_entries from anon, authenticated;");
   });

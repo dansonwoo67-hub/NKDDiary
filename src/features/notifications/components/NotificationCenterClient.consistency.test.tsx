@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationItem } from "@/features/notifications/actions";
 import { NotificationCenterClient } from "./NotificationCenterClient";
 
-const { markNotificationReadAction, validateJournalEntryForUser, push, refresh } = vi.hoisted(() => ({
+const { markNotificationReadAction, validateJournalEntryForUser, resolveLetterNotificationAction, push, refresh } = vi.hoisted(() => ({
   markNotificationReadAction: vi.fn(),
   validateJournalEntryForUser: vi.fn(),
+  resolveLetterNotificationAction: vi.fn(),
   push: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -18,6 +19,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/features/notifications/actions", () => ({
   markNotificationReadAction,
   validateJournalEntryForUser,
+  resolveLetterNotificationAction,
 }));
 
 const unreadLetter: NotificationItem = {
@@ -52,6 +54,7 @@ describe("NotificationCenterClient click consistency", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     validateJournalEntryForUser.mockResolvedValue({ ok: true, message: "" });
+    resolveLetterNotificationAction.mockResolvedValue({ ok: true, href: "/journal/thread/thread-1?letter=letter-1" });
   });
   afterEach(cleanup);
 
@@ -85,8 +88,43 @@ describe("NotificationCenterClient click consistency", () => {
     resolveMark({ ok: true, message: "已读。" });
 
     await waitFor(() => {
-      expect(push).toHaveBeenCalledWith("/journal/letter-1");
+      expect(push).toHaveBeenCalledWith("/journal/thread/thread-1?letter=letter-1");
     });
     expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("resolves and navigates an already-read letter notification again", async () => {
+    render(
+      <NotificationCenterClient
+        accountId="user-1"
+        inbox={[{ ...unreadLetter, isRead: true }]}
+        activity={[]}
+        inboxUnreadCount={0}
+        activityUnreadCount={0}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Susan/ }));
+
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/journal/thread/thread-1?letter=letter-1"));
+    expect(markNotificationReadAction).not.toHaveBeenCalled();
+  });
+
+  it("does not navigate when the backend resolver reports an inactive notification", async () => {
+    resolveLetterNotificationAction.mockResolvedValue({ ok: false, message: "这条提醒已失效。" });
+    render(
+      <NotificationCenterClient
+        accountId="user-1"
+        inbox={[{ ...unreadLetter, isRead: true }]}
+        activity={[]}
+        inboxUnreadCount={0}
+        activityUnreadCount={0}
+      />,
+    );
+    fireEvent.click(screen.getAllByRole("button")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /Susan/ }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("这条提醒已失效。"));
+    expect(push).not.toHaveBeenCalled();
   });
 });

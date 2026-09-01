@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getMostRecentOccurrence, type CalendarRecurrence } from "@/features/calendar/recurrence";
 import { calendarBelongsInMemories, type CalendarMemoryType } from "@/features/memories/rules";
+import { compareMemoryChronology } from "@/features/memories/domain";
 import { getChinaDateString } from "@/lib/date/china-day";
 
 type MoodRow = {
@@ -101,9 +102,7 @@ export function buildMemoryFeed(input: {
         }]
       : [];
   });
-  return [...memories, ...moods, ...events].sort(
-    (a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt),
-  );
+  return [...memories, ...moods, ...events].sort(compareMemoryChronology);
 }
 
 export async function listMemories(client: SupabaseClient, spaceId: string) {
@@ -131,7 +130,18 @@ export async function listMemories(client: SupabaseClient, spaceId: string) {
     today: getChinaDateString(),
   });
 
-  return Promise.all(feed.map(async (item) => {
+  const imagePaths = feed.flatMap((item) => item.kind === "memory" && item.imagePath ? [item.imagePath] : []);
+  const signedUrls = new Map<string, string>();
+  if (imagePaths.length) {
+    const { data, error } = await client.storage.from("memory-images").createSignedUrls(imagePaths, 300);
+    if (!error) {
+      for (const item of data ?? []) {
+        if (item.path && item.signedUrl) signedUrls.set(item.path, item.signedUrl);
+      }
+    }
+  }
+
+  return feed.map((item) => {
     const profile = item.authorId ? profileMap.get(item.authorId) : null;
     const enriched = {
       ...item,
@@ -139,7 +149,6 @@ export async function listMemories(client: SupabaseClient, spaceId: string) {
       authorAvatarUrl: item.authorAvatarUrl ?? profile?.avatar_url ?? null,
     };
     if (item.kind !== "memory" || !item.imagePath) return enriched;
-    const { data, error } = await client.storage.from("memory-images").createSignedUrl(item.imagePath, 300);
-    return { ...enriched, imageUrl: error ? null : data.signedUrl };
-  }));
+    return { ...enriched, imageUrl: signedUrls.get(item.imagePath) ?? null };
+  });
 }

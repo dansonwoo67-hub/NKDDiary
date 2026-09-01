@@ -1,6 +1,16 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/features/memories/components/MemoryComposer", () => ({
+  MemoryComposer: ({ onCreated, today }: { onCreated?: () => void; today: string }) => (
+    <>
+      <output data-testid="composer-today">{today}</output>
+      <button type="button" onClick={onCreated}>完成添加回忆</button>
+    </>
+  ),
+}));
+
 import { MemoryTimeline } from "./MemoryTimeline";
 
 const items = [
@@ -53,5 +63,21 @@ describe("MemoryTimeline", () => {
     expect(observe).toHaveBeenCalled();
     unmount();
     expect(disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("closes composer modal after composer reports success", () => {
+    render(<MemoryTimeline items={items} viewerId="u1" now={new Date("2026-07-25T03:00:00Z")} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "添加回忆" })[0]);
+    expect(screen.getByRole("dialog", { name: "添加回忆" })).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "完成添加回忆" }));
+    expect(screen.queryByRole("dialog", { name: "添加回忆" })).not.toBeInTheDocument();
+  });
+
+  it("uses Taipei date for composer when UTC is still previous day", () => {
+    render(<MemoryTimeline items={items} viewerId="u1" now={new Date("2026-08-28T16:01:00Z")} />);
+    fireEvent.click(screen.getAllByRole("button", { name: "添加回忆" })[0]);
+
+    expect(screen.getByTestId("composer-today")).toHaveTextContent("2026-08-29");
   });
 });

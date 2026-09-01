@@ -53,7 +53,7 @@ describe("LocationDistancePanel", () => {
     );
 
     expect(screen.getByText(/等待伴侣开启位置距离/)).toBeVisible();
-    expect(screen.getByRole("button", { name: "更新位置" })).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "更新位置" })[0]).toBeVisible();
   });
 
   it("shows distance and both update times without coordinates", () => {

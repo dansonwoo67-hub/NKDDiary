@@ -1,14 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   browserContextOptionsFromProjectUse,
   fetchExpectedLoginReadiness,
   hasChildExited,
   integrationEnvironmentMissing,
   isExpectedLoginReadiness,
+  loadE2eEnv,
   parseEnvFile,
   planTreeTermination,
   RESPONSIVE_VIEWPORTS,
 } from "./playwright-e2e-config";
+
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 describe("Playwright E2E environment", () => {
   it("gates the exact mobile, tablet, and desktop release widths", () => {
@@ -25,6 +37,29 @@ describe("Playwright E2E environment", () => {
       B: "two",
       C: "three",
     });
+  });
+
+  it("loads only .env.e2e.local and ignores .env.local", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "nkd-e2e-env-"));
+    temporaryDirectories.push(directory);
+    writeFileSync(path.join(directory, ".env.local"), "SOURCE=production\nPRODUCTION_ONLY=yes\n");
+    writeFileSync(path.join(directory, ".env.e2e.local"), "SOURCE=e2e\nE2E_ONLY=yes\n");
+    const environment: Record<string, string | undefined> = {};
+
+    loadE2eEnv(directory, environment);
+
+    expect(environment).toEqual({ SOURCE: "e2e", E2E_ONLY: "yes" });
+  });
+
+  it("does not overwrite an explicitly supplied process environment value", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "nkd-e2e-env-"));
+    temporaryDirectories.push(directory);
+    writeFileSync(path.join(directory, ".env.e2e.local"), "SOURCE=e2e\n");
+    const environment: Record<string, string | undefined> = { SOURCE: "explicit" };
+
+    loadE2eEnv(directory, environment);
+
+    expect(environment.SOURCE).toBe("explicit");
   });
 
   it("reports every missing integration prerequisite without exposing values", () => {

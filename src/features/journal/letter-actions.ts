@@ -15,6 +15,7 @@ const letterSchema = z.object({
   stationeryTheme: theme,
   moodEmoji: moodEmoji,
 });
+const threadLetterSchema = letterSchema.omit({ recipientId: true });
 
 const idSchema = z.string().uuid();
 
@@ -35,6 +36,14 @@ function refresh(entryId?: string) {
   revalidatePath("/");
   revalidatePath("/journal");
   if (entryId) revalidatePath(`/journal/${entryId}`);
+}
+
+function withdrawErrorMessage(message: string) {
+  if (message.includes("already read")) return "对方已经读过这封信，不能再撤回了。";
+  if (message.includes("already withdrawn")) return "这封信已经撤回了。";
+  if (message.includes("capsule letters")) return "胶囊信封存后不能撤回。";
+  if (message.includes("not found or unauthorized")) return "没有找到可撤回的信件。";
+  return "这封信寄出已经超过 24 小时啦，现在会安心留在彼此的信箱里。";
 }
 
 export async function createLetterAction(input: unknown) {
@@ -66,8 +75,48 @@ export async function withdrawLetterAction(entryId: string) {
   await requireUser();
   const client = await createServerSupabaseClient();
   const { error } = await client.rpc("withdraw_letter_diary", { p_entry_id: entryId });
-  if (error) return result(false, "这封信寄出已经超过 24 小时啦，现在会安心留在彼此的信箱里。");
+  if (error) return result(false, withdrawErrorMessage(error.message));
   refresh(entryId); return result(true, "信件已撤回。");
+}
+
+async function sendThreadLetter(
+  rpcName: "reply_to_letter" | "resend_withdrawn_letter",
+  idField: "p_target_id" | "p_withdrawn_id",
+  entryId: string,
+  input: unknown,
+  successMessage: string,
+) {
+  const parsedId = idSchema.safeParse(entryId);
+  const parsed = threadLetterSchema.safeParse(input);
+  if (!parsedId.success || !parsed.success) return result(false, "信件内容需要重新检查一下。");
+  await requireUser();
+  const client = await createServerSupabaseClient();
+  const html = safeHtml(parsed.data.html);
+  const { data, error } = await client.rpc(rpcName, {
+    [idField]: parsedId.data,
+    p_rich_content: { type: "doc", html, text: parsed.data.text },
+    p_plain_text: parsed.data.text,
+    p_stationery_theme: parsed.data.stationeryTheme,
+    p_mood_emoji: parsed.data.moodEmoji ?? null,
+  });
+  if (error) return result(false, "这封信暂时无法寄出，请稍后再试。");
+  const newEntryId = typeof data === "string" ? data : undefined;
+  refresh(newEntryId);
+  return result(true, successMessage, newEntryId);
+}
+
+export async function replyToLetterAction(entryId: string, input: unknown) {
+  return await sendThreadLetter("reply_to_letter", "p_target_id", entryId, input, "回信已寄出。");
+}
+
+export async function resendWithdrawnLetterAction(entryId: string, input: unknown) {
+  return await sendThreadLetter(
+    "resend_withdrawn_letter",
+    "p_withdrawn_id",
+    entryId,
+    input,
+    "新信已寄出，原撤回记录保持不变。",
+  );
 }
 
 export async function markLetterReadAction(entryId: string) {

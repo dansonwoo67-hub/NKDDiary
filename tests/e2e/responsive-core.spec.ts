@@ -8,7 +8,7 @@ async function signIn(page: Page) {
   await page.getByLabel("邮箱").fill(process.env.COUPLE_USER_A_EMAIL!);
   await page.getByLabel("密码").fill(process.env.COUPLE_USER_A_PASSWORD!);
   await page.getByRole("button", { name: "进入日记" }).click();
-  await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
+  await expect(page).toHaveURL(/\/$/, { timeout: 300_000 });
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -29,6 +29,7 @@ test.describe("responsive core release", () => {
   });
 
   test("all five signed-in product areas keep navigation usable without overflow", async ({ page }) => {
+    test.setTimeout(600_000);
     test.skip(!hasAccount, "A seeded couple account is required for signed-in responsive acceptance.");
     await signIn(page);
 

@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationItem } from "@/features/notifications/actions";
 import { NotificationCenterClient } from "./NotificationCenterClient";
 
-const { markNotificationReadAction, validateJournalEntryForUser, push, refresh } = vi.hoisted(() => ({
+const { markNotificationReadAction, validateJournalEntryForUser, resolveLetterNotificationAction, push, refresh } = vi.hoisted(() => ({
   markNotificationReadAction: vi.fn(),
   validateJournalEntryForUser: vi.fn(),
+  resolveLetterNotificationAction: vi.fn(),
   push: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -21,6 +22,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/features/notifications/actions", () => ({
   markNotificationReadAction,
   validateJournalEntryForUser,
+  resolveLetterNotificationAction,
 }));
 
 function notification(type: string): NotificationItem {

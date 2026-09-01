@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationItem } from "@/features/notifications/actions";
 import { NotificationCenterClient } from "./NotificationCenterClient";
 
-const { markNotificationReadAction, validateJournalEntryForUser, push, refresh } = vi.hoisted(() => ({
+const { markNotificationReadAction, validateJournalEntryForUser, resolveLetterNotificationAction, push, refresh } = vi.hoisted(() => ({
   markNotificationReadAction: vi.fn(),
   validateJournalEntryForUser: vi.fn(),
+  resolveLetterNotificationAction: vi.fn(),
   push: vi.fn(),
   refresh: vi.fn(),
 }));
@@ -17,6 +18,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/features/notifications/actions", () => ({
   markNotificationReadAction,
   validateJournalEntryForUser,
+  resolveLetterNotificationAction,
 }));
 
 function item(id: string, actorName: string): NotificationItem {
@@ -48,6 +50,7 @@ describe("NotificationCenterClient account isolation", () => {
     vi.clearAllMocks();
     validateJournalEntryForUser.mockResolvedValue({ ok: true, message: "" });
     markNotificationReadAction.mockResolvedValue({ ok: true, message: "已读。" });
+    resolveLetterNotificationAction.mockResolvedValue({ ok: true, href: "/journal/thread/thread-1" });
   });
   afterEach(cleanup);
 
@@ -75,17 +78,17 @@ describe("NotificationCenterClient account isolation", () => {
   });
 
   it("ignores completion from a notification click started by the previous account", async () => {
-    let resolveValidation: (value: { ok: boolean; message: string }) => void = () => {};
-    validateJournalEntryForUser.mockImplementation(() => new Promise((resolve) => {
-      resolveValidation = resolve;
+    let resolveTarget: (value: { ok: boolean; href: string; message: string }) => void = () => {};
+    resolveLetterNotificationAction.mockImplementation(() => new Promise((resolve) => {
+      resolveTarget = resolve;
     }));
     const view = render(<NotificationCenterClient {...props("susan", "Niki", 1)} />);
     fireEvent.click(screen.getByRole("button", { name: /收信箱/ }));
     fireEvent.click(screen.getByRole("button", { name: /Niki/ }));
-    await waitFor(() => expect(validateJournalEntryForUser).toHaveBeenCalledOnce());
+    await waitFor(() => expect(resolveLetterNotificationAction).toHaveBeenCalledOnce());
 
     view.rerender(<NotificationCenterClient {...props("niki", "Susan", 4)} />);
-    resolveValidation({ ok: true, message: "" });
+    resolveTarget({ ok: true, href: "/journal/thread/old-thread", message: "" });
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /收信箱/ })).toHaveTextContent("4");

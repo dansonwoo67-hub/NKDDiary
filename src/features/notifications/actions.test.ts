@@ -107,6 +107,50 @@ describe("notification routing", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("starts independent notification enrichment reads together", async () => {
+    const notificationData = [
+      { id: "n1", type: "journal_created", source_id: "j1", title: "信", body: "", is_read: false, created_at: "2026-08-01T00:00:00Z", actor_id: "user-2", metadata: {} },
+      { id: "n2", type: "calendar_event_created", source_id: "c1", title: "日历", body: "", is_read: false, created_at: "2026-08-01T00:00:00Z", actor_id: "user-2", metadata: {} },
+    ];
+    const notificationQuery = { eq: vi.fn(), gte: vi.fn(), order: vi.fn(), limit: vi.fn() };
+    notificationQuery.eq.mockReturnValue(notificationQuery);
+    notificationQuery.gte.mockReturnValue(notificationQuery);
+    notificationQuery.order.mockReturnValue(notificationQuery);
+    notificationQuery.limit.mockResolvedValue({ data: notificationData, error: null });
+
+    const started: string[] = [];
+    const releases = new Map<string, (value: unknown) => void>();
+    const deferredRead = (table: string, data: unknown[]) => ({
+      select: vi.fn(() => ({
+        in: vi.fn(() => {
+          started.push(table);
+          return new Promise((resolve) => releases.set(table, () => resolve({ data, error: null })));
+        }),
+      })),
+    });
+    const tables = {
+      profiles: deferredRead("profiles", [{ id: "user-2", display_name: "Niki" }]),
+      journal_entries: deferredRead("journal_entries", [{ id: "j1", entry_date: "2026-08-01", open_at: null }]),
+      calendar_events: deferredRead("calendar_events", [{ id: "c1", event_date: "2026-08-01", event_type: "date", name: "约会" }]),
+    };
+    const from = vi.fn((table: string) => table === "notifications"
+      ? { select: vi.fn(() => notificationQuery) }
+      : tables[table as keyof typeof tables]);
+    mockCreateClient.mockResolvedValue({ from } as never);
+
+    const pending = getNotificationCenterData();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    try {
+      expect(started).toEqual(["profiles", "journal_entries", "calendar_events"]);
+    } finally {
+      for (let index = 0; index < 3; index += 1) {
+        for (const release of releases.values()) release(undefined);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      await pending;
+    }
+  });
+
   it("counts every active unread notification without list or date limits", async () => {
     const data = [
       ...Array.from({ length: 6 }, (_, index) => ({

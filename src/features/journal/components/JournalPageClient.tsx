@@ -2,30 +2,20 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Mail, Star, Trash2, Edit3, Clock, Lock, Sparkles, Calendar } from "lucide-react";
+import { Send, Trash2, Edit3, Clock, Lock, Sparkles, Calendar } from "lucide-react";
 import { RichLetterComposer } from "./RichLetterComposer";
-import { EnvelopeLetterCard } from "./EnvelopeLetterCard";
+import { LetterThreadList } from "./LetterThreadList";
 import { deleteDraftAction } from "@/features/journal/draft-actions";
-import type { LetterListItem } from "../letter-repository";
+import type { LetterThreadSummary } from "../thread-repository";
 import type { LetterDraft } from "../draft-repository";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
-type Category = "all" | "inbox" | "sent" | "starred";
-
-type Boxes = {
-  sent: LetterListItem[];
-  inbox: LetterListItem[];
-  starred: LetterListItem[];
-};
-
 type Props = {
-  boxes: Boxes;
+  threads: LetterThreadSummary[];
   partnerId: string;
   partnerName: string;
   userId: string;
   draft: LetterDraft | null;
-  unreadLetterIds: string[];
-  defaultBox?: string;
 };
 
 interface LetterLimitStatus {
@@ -152,13 +142,9 @@ function formatCountdown(resetAt: string): string {
   }
 }
 
-export function JournalPageClient({ boxes, partnerId, partnerName, userId, draft, unreadLetterIds, defaultBox }: Props) {
+export function JournalPageClient({ threads, partnerId, partnerName, userId, draft }: Props) {
   const router = useRouter();
   const [showComposer, setShowComposer] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<Category>((defaultBox as Category) || "all");
-  const [unreadIds, setUnreadIds] = useState<Set<string>>(
-    () => new Set(unreadLetterIds),
-  );
   const [localDraft, setLocalDraft] = useState<LocalDraft | null>(null);
   const [capsuleDraft, setCapsuleDraft] = useState<CapsuleLocalDraft | null>(null);
   const [deletingDraft, setDeletingDraft] = useState(false);
@@ -216,49 +202,6 @@ export function JournalPageClient({ boxes, partnerId, partnerName, userId, draft
     return () => clearInterval(timer);
   }, [capsuleLimit]);
 
-  const allLetters = useMemo(() => {
-    // Deduplicate by id: a letter should appear once even if it somehow
-    // ends up in both inbox and sent arrays.
-    const seen = new Set<string>();
-    const all = [...boxes.inbox, ...boxes.sent].filter((x) => {
-      if (seen.has(x.id)) return false;
-      seen.add(x.id);
-      return true;
-    });
-    return all.sort((a, b) =>
-      new Date(b.publishedAt ?? b.createdAt).getTime() -
-      new Date(a.publishedAt ?? a.createdAt).getTime()
-    );
-  }, [boxes.inbox, boxes.sent]);
-
-  const filteredList = useMemo(() => {
-    switch (activeCategory) {
-      case "all":
-        return allLetters;
-      case "inbox":
-        return boxes.inbox;
-      case "sent":
-        return boxes.sent;
-      case "starred":
-        return boxes.starred;
-      default:
-        return allLetters;
-    }
-  }, [activeCategory, allLetters, boxes]);
-
-  const unreadLetters = useMemo(() => {
-    return boxes.inbox.filter(x => unreadIds.has(x.id));
-  }, [boxes.inbox, unreadIds]);
-
-  function handleOpenLetter(letterId: string) {
-    setUnreadIds(prev => {
-      const next = new Set(prev);
-      next.delete(letterId);
-      return next;
-    });
-    router.push(`/journal/${letterId}`);
-  }
-
   const handleOpenComposer = () => {
     setShowComposer(true);
   };
@@ -311,26 +254,12 @@ export function JournalPageClient({ boxes, partnerId, partnerName, userId, draft
     return null;
   }, [draft, localDraft, userId]);
 
-  const categoryLabels: Record<Category, string> = {
-    all: "全部",
-    inbox: "收信箱",
-    sent: "已寄出",
-    starred: "收藏夹",
-  };
-
-  const categoryCounts: Record<Category, number> = {
-    all: allLetters.length,
-    inbox: boxes.inbox.length,
-    sent: boxes.sent.length,
-    starred: boxes.starred.length,
-  };
-
   return (
     <div className="grid gap-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-semibold tracking-[.22em] text-[var(--rose)]">JOURNAL LETTERS</p>
-          <h1 className="mt-2 font-serif text-3xl font-semibold sm:text-4xl">我们的日记</h1>
+          <p className="text-sm font-semibold tracking-[.22em] text-[var(--rose)]">LETTERS</p>
+          <h1 className="mt-2 font-serif text-3xl font-semibold sm:text-4xl">我们的信件</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -468,77 +397,11 @@ export function JournalPageClient({ boxes, partnerId, partnerName, userId, draft
         </section>
       )}
 
-      {unreadLetters.length > 0 && (
-        <section className="flex flex-wrap gap-3">
-          {unreadLetters.map(letter => (
-            <button
-              key={letter.id}
-              type="button"
-              onClick={() => handleOpenLetter(letter.id)}
-              className="unread-envelope group relative flex h-16 w-16 items-center justify-center rounded-xl border-2 border-[var(--rose)] bg-white/80 shadow-md transition hover:-translate-y-1 hover:shadow-lg"
-            >
-              <Mail size={24} className="text-[var(--rose)]" />
-              <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-[var(--rose)] text-[10px] font-bold text-white">
-                {unreadLetters.indexOf(letter) + 1}
-              </span>
-              <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br from-white/60 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-          ))}
-        </section>
-      )}
-
-      <nav className="flex flex-wrap items-center gap-2" aria-label="日记信箱">
-        {(["all", "inbox", "sent", "starred"] as Category[]).map(cat => (
-          <button
-            key={cat}
-            type="button"
-            onClick={() => setActiveCategory(cat)}
-            className={`journal-box-tab flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition ${
-              activeCategory === cat
-                ? "bg-[var(--ink)] text-white shadow-lg"
-                : "bg-white/70 text-[var(--muted-ink)] hover:bg-white/90"
-            }`}
-          >
-            {cat === "all" && <Star size={14} />}
-            {cat === "inbox" && <Mail size={14} />}
-            {cat === "sent" && <Send size={14} />}
-            {cat === "starred" && <Star size={14} fill="currentColor" />}
-            {categoryLabels[cat]}
-            <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-xs">
-              {categoryCounts[cat]}
-            </span>
-          </button>
-        ))}
-      </nav>
-
       <section>
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-serif text-2xl font-semibold">
-            {activeCategory === "all" ? "所有信件" : activeCategory === "inbox" ? "收到的信" : activeCategory === "sent" ? "寄出的信" : "收藏夹"}
-          </h2>
+          <h2 className="font-serif text-2xl font-semibold">往来信件</h2>
         </div>
-        {filteredList.length ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {filteredList.map(letter => {
-              const isSentByUser = letter.authorId === userId;
-              return (
-                <EnvelopeLetterCard
-                  key={letter.id}
-                  letter={letter}
-                  mode={activeCategory === "inbox" ? "inbox" : activeCategory === "sent" ? "sent" : (isSentByUser ? "sent" : "inbox")}
-                  personName={partnerName}
-                  userId={userId}
-                  isUnread={unreadIds.has(letter.id)}
-                  onOpen={() => handleOpenLetter(letter.id)}
-                />
-              );
-            })}
-          </div>
-        ) : (
-          <div className="cos-card py-16 text-center text-sm text-[var(--muted-ink)]">
-            {activeCategory === "all" ? "还没有任何信件。" : activeCategory === "inbox" ? "信箱里还安安静静的。" : activeCategory === "sent" ? "还没有寄出的信。" : "还没有收藏任何信件。"}
-          </div>
-        )}
+        <LetterThreadList key={userId} accountId={userId} counterpartName={partnerName} threads={threads} />
       </section>
 
       {showComposer && (

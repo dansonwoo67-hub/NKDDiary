@@ -23,7 +23,7 @@ describe("home overview", () => {
     expect(overview.recentMemories.map((item) => item.id)).toEqual(["memory", "mood"]);
   });
 
-  it("orders the story line by the real submission time, newest first", () => {
+  it("uses the same occurred-time-first chronology as the memory feed", () => {
     const overview = buildHomeOverview({
       memories: [
         {
@@ -45,7 +45,21 @@ describe("home overview", () => {
       today: "2026-07-26",
     });
 
-    expect(overview.recentMemories.map((item) => item.id)).toEqual(["newer-mood", "older-memory"]);
+    expect(overview.recentMemories.map((item) => item.id)).toEqual(["older-memory", "newer-mood"]);
+  });
+
+  it("breaks identical timestamps deterministically by kind then id", () => {
+    const overview = buildHomeOverview({
+      memories: [
+        { id: "b", kind: "mood", title: "B", occurredAt: "2026-07-26T12:00:00+08:00", createdAt: "2026-07-26T12:00:00+08:00" },
+        { id: "a", kind: "mood", title: "A", occurredAt: "2026-07-26T12:00:00+08:00", createdAt: "2026-07-26T12:00:00+08:00" },
+        { id: "z", kind: "memory", title: "Z", occurredAt: "2026-07-26T12:00:00+08:00", createdAt: "2026-07-26T12:00:00+08:00" },
+      ],
+      calendarDays: [],
+      today: "2026-07-26",
+    });
+
+    expect(overview.recentMemories.map((item) => item.id)).toEqual(["z", "a", "b"]);
   });
 
   it("does not impose a fixed item count on the recent story line", () => {

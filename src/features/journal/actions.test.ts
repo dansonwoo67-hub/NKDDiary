@@ -39,6 +39,7 @@ describe("journal server actions", () => {
     mockRequireUser.mockResolvedValue({
       userId: "11111111-1111-4111-8111-111111111111",
       spaceId: "22222222-2222-4222-8222-222222222222",
+      email: "user@example.test",
       profile: {} as never,
     });
     mockGetJournalEntry.mockResolvedValue({ imagePath: null } as never);
@@ -49,7 +50,7 @@ describe("journal server actions", () => {
     const input = {
       content: "  Open this together  ",
       recipientId: "33333333-3333-4333-8333-333333333333",
-      openAt: "2026-08-01T20:00:00+08:00",
+      openAt: "2099-08-01T20:00:00+08:00",
     };
 
     await expect(sealFutureDiaryAction(input)).resolves.toEqual({
@@ -62,7 +63,7 @@ describe("journal server actions", () => {
       p_title: "",
       p_content: "Open this together",
       p_recipient_id: "33333333-3333-4333-8333-333333333333",
-      p_open_at: "2026-08-01T20:00:00+08:00",
+      p_open_at: "2099-08-01T20:00:00+08:00",
       p_image_path: null,
     });
     expect(from).not.toHaveBeenCalled();
@@ -123,7 +124,7 @@ describe("journal server actions", () => {
       sealFutureDiaryAction({
         content: "Open this together",
         recipientId: "33333333-3333-4333-8333-333333333333",
-        openAt: "2026-08-01T20:00:00+08:00",
+        openAt: "2099-08-01T20:00:00+08:00",
       }),
     ).resolves.toEqual({ ok: false, message: "今天已经封存过一封胶囊信了，明天再继续写吧。" });
   });
@@ -161,7 +162,7 @@ describe("journal server actions", () => {
       sealFutureDiaryAction({
         content: "Open this together",
         recipientId: "33333333-3333-4333-8333-333333333333",
-        openAt: "2026-08-01T20:00:00+08:00",
+        openAt: "2099-08-01T20:00:00+08:00",
       }),
     ).resolves.toEqual({ ok: false, message: "刚刚没有成功，请别担心，内容还在这里。稍后再试一次就好啦。" });
   });
@@ -206,7 +207,7 @@ describe("journal server actions", () => {
     await expect(sealFutureDiaryAction({
       content: "Open this together",
       recipientId: "33333333-3333-4333-8333-333333333333",
-      openAt: "2026-08-01T20:00:00+08:00",
+      openAt: "2099-08-01T20:00:00+08:00",
       imagePath,
     })).resolves.toEqual({ ok: false, message: "胶囊信内容需要重新检查一下哦。" });
     await expect(updateTodayDiaryAction("44444444-4444-4444-8444-444444444444", {

@@ -29,6 +29,7 @@ vi.mock("@/lib/supabase/server", () => ({
   }),
 }));
 
+import { getMemoryDayBounds } from "./day-bounds";
 import { createMemoryAction, deleteMemoryAction, updateMemoryAction } from "./actions";
 
 describe("memory actions", () => {
@@ -57,6 +58,13 @@ describe("memory actions", () => {
       p_image_path: null,
     }));
     expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("uses Taipei business-day bounds when UTC still shows the previous day", () => {
+    expect(getMemoryDayBounds(new Date("2026-08-28T16:01:00Z"))).toEqual({
+      start: "2026-08-28T16:00:00.000Z",
+      end: "2026-08-29T16:00:00.000Z",
+    });
   });
 
   it("rejects invalid input without creating data", async () => {

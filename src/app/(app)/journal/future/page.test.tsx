@@ -29,6 +29,7 @@ describe("FutureDiaryPage", () => {
     vi.mocked(requireUser).mockResolvedValue({
       userId: "author-1",
       spaceId: "space-1",
+      email: "user@example.test",
       profile: { display_name: "小丹" } as never,
     });
     vi.mocked(createServerSupabaseClient).mockResolvedValue({} as never);

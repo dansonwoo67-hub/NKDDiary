@@ -1,36 +1,17 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+import {
+  assertWriteCapableE2eEnvironment,
+  type WriteCapableE2eEnvironment,
+} from "./e2e-environment-guard";
+import { loadE2eEnv } from "./playwright-e2e-config";
 
 const COUPLE_SPACE_ID = "00000000-0000-4000-8000-000000000001";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function loadLocalEnv() {
-  const envPath = path.join(process.cwd(), ".env.local");
-
-  if (!existsSync(envPath)) return;
-
-  for (const line of readFileSync(envPath, "utf8").split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const separatorIndex = trimmed.indexOf("=");
-    if (separatorIndex === -1) continue;
-
-    const key = trimmed.slice(0, separatorIndex).trim();
-    let value = trimmed.slice(separatorIndex + 1).trim();
-
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-
-    process.env[key] ??= value;
-  }
+export function validateSeedEnvironment(environment: WriteCapableE2eEnvironment = process.env) {
+  return assertWriteCapableE2eEnvironment(environment);
 }
 
 export function validateSeedUserIds(userAId: string | undefined, userBId: string | undefined) {
@@ -52,6 +33,14 @@ export function validateSeedUserIds(userAId: string | undefined, userBId: string
   return [normalizedUserAId, normalizedUserBId] as const;
 }
 
+export function validateSyntheticE2eEmail(value: string | undefined) {
+  const email = value?.trim().toLowerCase();
+  if (!email || !email.includes("e2e") || !email.endsWith("@example.test")) {
+    throw new Error("E2E account email must be a synthetic E2E address under example.test");
+  }
+  return email;
+}
+
 function requireEnvironmentValue(key: string) {
   const value = process.env[key];
 
@@ -62,15 +51,52 @@ function requireEnvironmentValue(key: string) {
   return value;
 }
 
-async function main() {
-  loadLocalEnv();
+async function findUserByEmail(client: SupabaseClient, email: string): Promise<User | undefined> {
+  for (let page = 1; page <= 10; page += 1) {
+    const { data, error } = await client.auth.admin.listUsers({ page, perPage: 100 });
+    if (error) throw error;
+    const found = data.users.find((user) => user.email?.toLowerCase() === email);
+    if (found) return found;
+    if (data.users.length < 100) return undefined;
+  }
+  throw new Error("E2E Auth user lookup exceeded its bounded page limit");
+}
 
-  const userIds = validateSeedUserIds(
-    process.env.COUPLE_USER_A_ID,
-    process.env.COUPLE_USER_B_ID,
-  );
+async function ensureSyntheticUser(client: SupabaseClient, email: string, password: string) {
+  const existing = await findUserByEmail(client, email);
+  if (existing) {
+    const { data, error } = await client.auth.admin.updateUserById(existing.id, {
+      password,
+      email_confirm: true,
+      app_metadata: { ...existing.app_metadata, nkd_diary_member: "true", e2e_fixture: true },
+    });
+    if (error || !data.user) throw error ?? new Error("Unable to refresh E2E Auth user");
+    return data.user;
+  }
+  const { data, error } = await client.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    app_metadata: { nkd_diary_member: "true", e2e_fixture: true },
+  });
+  if (error || !data.user) throw error ?? new Error("Unable to create E2E Auth user");
+  return data.user;
+}
+
+async function main() {
+  loadE2eEnv();
+  const guard = validateSeedEnvironment();
+
   const supabaseUrl = requireEnvironmentValue("NEXT_PUBLIC_SUPABASE_URL");
-  const secretKey = requireEnvironmentValue("SUPABASE_SECRET_KEY");
+  const secretKey = requireEnvironmentValue("SUPABASE_SERVICE_ROLE_KEY");
+  const emails = [
+    validateSyntheticE2eEmail(process.env.COUPLE_USER_A_EMAIL),
+    validateSyntheticE2eEmail(process.env.COUPLE_USER_B_EMAIL),
+  ] as const;
+  const passwords = [
+    requireEnvironmentValue("COUPLE_USER_A_PASSWORD"),
+    requireEnvironmentValue("COUPLE_USER_B_PASSWORD"),
+  ] as const;
   const displayNames = [
     requireEnvironmentValue("COUPLE_USER_A_DISPLAY_NAME"),
     requireEnvironmentValue("COUPLE_USER_B_DISPLAY_NAME"),
@@ -79,28 +105,14 @@ async function main() {
   const supabase = createClient(supabaseUrl, secretKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+  console.log(`Environment: E2E Test\nSupabase Project Ref: ${guard.projectRef}\nProduction: ${guard.production}`);
 
   const authUsers = await Promise.all(
-    userIds.map(async (userId) => {
-      const { data, error } = await supabase.auth.admin.getUserById(userId);
-
-      if (error || !data.user) {
-        throw error ?? new Error(`Cannot find pre-created Auth user ${userId}`);
-      }
-
-      return data.user;
-    }),
+    emails.map((email, index) => ensureSyntheticUser(supabase, email, passwords[index])),
   );
+  const userIds = authUsers.map((user) => user.id);
 
   for (const [index, user] of authUsers.entries()) {
-    const { error: metadataError } = await supabase.auth.admin.updateUserById(user.id, {
-      app_metadata: { nkd_diary_member: "true" },
-    });
-
-    if (metadataError) {
-      throw metadataError;
-    }
-
     const { error: profileError } = await supabase.from("profiles").upsert({
       id: user.id,
       login_name: index === 0 ? "user_a" : "user_b",
@@ -136,6 +148,7 @@ async function main() {
   if (membershipError) {
     throw membershipError;
   }
+  console.log(`E2E fixture ready: 2 synthetic users and 1 space in ${guard.projectRef}.`);
 }
 
 const isDirectExecution =

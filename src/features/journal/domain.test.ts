@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canManageTodayDiary, deriveFutureState, getChinaDate, isTodayDiaryLocked } from "./domain";
 
 describe("future diary domain", () => {
-  it("uses the Shanghai calendar date", () => {
+  it("uses the relationship calendar date", () => {
     expect(getChinaDate(new Date("2026-07-19T16:30:00Z"))).toBe("2026-07-20");
   });
 

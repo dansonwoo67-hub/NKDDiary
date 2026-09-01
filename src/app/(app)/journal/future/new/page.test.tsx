@@ -21,7 +21,12 @@ describe("NewFutureDiaryPage", () => {
   });
 
   it("binds the form recipient from the authenticated couple membership", async () => {
-    vi.mocked(requireUser).mockResolvedValue({ userId: "author-1", spaceId: "space-1", profile: {} as never });
+    vi.mocked(requireUser).mockResolvedValue({
+      userId: "author-1",
+      spaceId: "space-1",
+      email: "user@example.test",
+      profile: {} as never,
+    });
     vi.mocked(createServerSupabaseClient).mockResolvedValue({} as never);
     vi.mocked(getFutureDiaryRecipient).mockResolvedValue({ id: "partner-1", displayName: "小楠" });
 

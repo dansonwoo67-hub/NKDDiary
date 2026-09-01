@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Sparkles } from "lucide-react";
-import { markNotificationReadAction, validateJournalEntryForUser, type NotificationItem } from "@/features/notifications/actions";
+import { markNotificationReadAction, resolveLetterNotificationAction, validateJournalEntryForUser, type NotificationItem } from "@/features/notifications/actions";
 import { formatNotification, formatNotificationDate } from "@/features/notifications/format";
 
 function Panel({ items, onOpen, empty, isInbox }: { items: NotificationItem[]; onOpen: (x: NotificationItem) => void; empty: string; isInbox?: boolean }) {
@@ -124,8 +124,23 @@ function NotificationCenterState({
   async function go(item: NotificationItem, k: "inbox" | "activity") {
     if (pendingReadIds.current.has(item.id)) return;
 
+    let targetHref = item.relatedEntryId
+      ? `/journal/${item.relatedEntryId}#comment-${item.sourceId}`
+      : item.href;
+    const isLetterNotification = item.type === "journal_created" || item.type === "future_diary_opened";
+
+    if (isLetterNotification) {
+      const resolved = await resolveLetterNotificationAction(item.id);
+      if (cancelled.current) return;
+      if (!resolved.ok || !resolved.href) {
+        setErrorMessage(resolved.message || "这条提醒已失效。");
+        return;
+      }
+      targetHref = resolved.href;
+    }
+
     // Validate journal entry access for journal-related notifications
-    if (item.type.includes("journal") || item.type.includes("future_diary")) {
+    if (!isLetterNotification && (item.type.includes("journal") || item.type.includes("future_diary"))) {
       const validation = await validateJournalEntryForUser(item.relatedEntryId || item.sourceId);
       if (cancelled.current) return;
       if (!validation.ok) {
@@ -179,12 +194,7 @@ function NotificationCenterState({
     setOpen(null);
     setPinned(null);
 
-    // Navigate with proper deep-link for comments
-    if (item.relatedEntryId) {
-      router.push(`/journal/${item.relatedEntryId}#comment-${item.sourceId}`);
-    } else {
-      router.push(item.href);
-    }
+    router.push(targetHref);
     router.refresh();
   }
 

@@ -144,8 +144,8 @@ describe("private journal image storage migration", () => {
 
       expect(start).toBeGreaterThanOrEqual(0);
       expect(definition).toContain("p_entry_id uuid default gen_random_uuid()");
-      expect(definition).toMatch(/insert into public\.journal_entries \(\s*id,/s);
-      expect(definition).toMatch(/values \(\s*p_entry_id,/s);
+      expect(definition).toMatch(/insert into public\.journal_entries \(\s*id,/);
+      expect(definition).toMatch(/values \(\s*p_entry_id,/);
       expect(definition).toContain("p_image_path <> p_space_id::text || '/' || v_user_id::text || '/' || p_entry_id::text || '.webp'");
     },
   );

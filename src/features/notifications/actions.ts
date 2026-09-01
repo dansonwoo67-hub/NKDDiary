@@ -6,6 +6,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import type { ActionResult } from "@/features/profile/actions";
 import { selectRecentNotifications } from "./selection";
 import { listActiveSpaceProfiles } from "@/features/profile/repository";
+import { buildNotificationHref, resolveLetterNotificationTarget } from "./target";
 
 export type NotificationItem = { 
   id:string; 
@@ -103,7 +104,7 @@ export async function getNotificationCenterData(): Promise<{ inbox: Notification
   const cutoff = new Date(Date.now()-30*86400000).toISOString();
   
   // Get partner's display_name as fallback
-  const partnerName = await (async () => {
+  const partnerNamePromise = (async () => {
     try {
       const profiles = await listActiveSpaceProfiles(supabase, spaceId);
       const partner = profiles.find(p => String(p.id) !== userId);
@@ -113,7 +114,7 @@ export async function getNotificationCenterData(): Promise<{ inbox: Notification
     }
   })();
   
-  const { data: rawData, error } = await supabase.from("notifications")
+  const notificationPromise = supabase.from("notifications")
     .select("id,type,source_id,title,body,is_read,created_at,actor_id,related_entry_id,metadata,is_active")
     .eq("recipient_id",userId)
     .gte("created_at",cutoff)
@@ -121,24 +122,19 @@ export async function getNotificationCenterData(): Promise<{ inbox: Notification
     .order("created_at",{ascending:false})
     .limit(60);
 
+  const [partnerName, { data: rawData, error }] = await Promise.all([
+    partnerNamePromise,
+    notificationPromise,
+  ]);
+
   if(error){
     throw new Error("Unable to load notifications");
   }
   const data = rawData as RawNotification[] | null;
   
   // Get actor display names
-  let actorIds: string[] = [];
   const names = new Map<string, string>();
-  
-  try {
-    actorIds = [...new Set((data ?? []).map((x: RawNotification) => String(x.actor_id)).filter(Boolean))];
-    if(actorIds.length){ 
-      const {data:profiles} = await supabase.from("profiles").select("id,display_name").in("id",actorIds); 
-      for(const p of profiles??[]) names.set(String(p.id), String(p.display_name)); 
-    }
-  } catch (e) {
-    console.warn("Failed to get actor display names, using fallback", e);
-  }
+  const actorIds = [...new Set((data ?? []).map((x: RawNotification) => String(x.actor_id)).filter(Boolean))];
 
   const journalIds = new Set<string>();
   const calendarIds = new Set<string>();
@@ -158,17 +154,30 @@ export async function getNotificationCenterData(): Promise<{ inbox: Notification
   });
 
   const journalDates = new Map<string, string>();
-  if(journalIds.size){ 
-    const {data:j} = await supabase.from("journal_entries").select("id,entry_date,open_at").in("id",[...journalIds]); 
-    for(const x of j??[]) journalDates.set(String(x.id), String(x.entry_date ?? x.open_at ?? "")); 
-  }
-
-  // Query calendar events for date info
   const calendarEvents = new Map<string, { eventDate: string; eventType: string; titleSnapshot: string }>();
-  
-  if(calendarIds.size){
-    const {data:ce, error:ceError} = await supabase.from("calendar_events").select("id,event_date,event_type,name").in("id",[...calendarIds]);
-    
+
+  const [profilesResult, journalsResult, calendarResult] = await Promise.all([
+    actorIds.length
+      ? supabase.from("profiles").select("id,display_name").in("id",actorIds)
+      : Promise.resolve({ data: [], error: null }),
+    journalIds.size
+      ? supabase.from("journal_entries").select("id,entry_date,open_at").in("id",[...journalIds])
+      : Promise.resolve({ data: [], error: null }),
+    calendarIds.size
+      ? supabase.from("calendar_events").select("id,event_date,event_type,name").in("id",[...calendarIds])
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (profilesResult.error) {
+    console.warn("Failed to get actor display names, using fallback", profilesResult.error);
+  } else {
+    for (const profile of profilesResult.data ?? []) names.set(String(profile.id), String(profile.display_name));
+  }
+  for (const journal of journalsResult.data ?? []) {
+    journalDates.set(String(journal.id), String(journal.entry_date ?? journal.open_at ?? ""));
+  }
+  if (calendarIds.size) {
+    const { data: ce, error: ceError } = calendarResult;
     if (ceError) {
       console.error("Failed to query calendar_events:", ceError.message, ceError.code);
     } else if (ce && ce.length > 0) {
@@ -274,6 +283,22 @@ export async function markNotificationReadAction(id:string):Promise<ActionResult
   }
   revalidatePath("/"); 
   return{ok:true,message:"已读。"}; 
+}
+
+export async function resolveLetterNotificationAction(id: string): Promise<{
+  ok: boolean;
+  href?: string;
+  message: string;
+}> {
+  await requireUser();
+  const supabase = await createServerSupabaseClient();
+  try {
+    const target = await resolveLetterNotificationTarget(supabase, id);
+    if (!target) return { ok: false, message: "这条提醒已失效。" };
+    return { ok: true, href: buildNotificationHref(target), message: "" };
+  } catch {
+    return { ok: false, message: "暂时无法打开这封信，请稍后重试。" };
+  }
 }
 
 export async function getUnreadNotifications() {

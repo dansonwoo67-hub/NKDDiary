@@ -1,5 +1,6 @@
 import type { CalendarEventChip } from "@/features/calendar/types";
 import type { MemoryItem } from "@/features/memories/repository";
+import { compareMemoryChronology } from "@/features/memories/domain";
 
 type HomeCalendarDay = {
   date: string;
@@ -17,11 +18,7 @@ export function buildHomeOverview({
 }) {
   const recentMemories = [...memories]
     .filter((item) => item.kind === "memory" || item.kind === "mood")
-    .sort((a, b) => {
-      const bTime = Date.parse(b.createdAt ?? b.occurredAt);
-      const aTime = Date.parse(a.createdAt ?? a.occurredAt);
-      return bTime - aTime;
-    });
+    .sort(compareMemoryChronology);
 
   const upcomingEvents = calendarDays
     .filter((day) => day.date >= today)

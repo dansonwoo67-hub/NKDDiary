@@ -1,0 +1,4 @@
+alter table public.journal_entries validate constraint journal_entries_thread_id_fkey;
+alter table public.journal_entries validate constraint journal_entries_reply_to_id_fkey;
+alter table public.journal_entries validate constraint journal_entries_reply_not_self_check;
+alter table public.journal_entries validate constraint journal_entries_thread_shape_check;

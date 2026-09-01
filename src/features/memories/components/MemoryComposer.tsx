@@ -1,32 +1,40 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { ImagePicker } from "@/features/media/ImagePicker";
 import { createMemoryAction } from "@/features/memories/actions";
 
 const BODY_LIMIT = 150;
 
-export function MemoryComposer({ today }: { today: string }) {
+export function MemoryComposer({ today, onCreated }: { today: string; onCreated?: () => void }) {
   const [image, setImage] = useState<Blob | null>(null);
   const [body, setBody] = useState("");
   const [message, setMessage] = useState("");
   const [isError, setIsError] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     const form = event.currentTarget;
     const formData = new FormData(form);
     if (image) formData.set("image", image, "memory.webp");
 
     startTransition(async () => {
-      const result = await createMemoryAction(formData);
-      setIsError(!result.ok);
-      setMessage(result.message);
-      if (result.ok) {
-        form.reset();
-        setBody("");
-        setImage(null);
+      try {
+        const result = await createMemoryAction(formData);
+        setIsError(!result.ok);
+        setMessage(result.message);
+        if (result.ok) {
+          form.reset();
+          setBody("");
+          setImage(null);
+          onCreated?.();
+        }
+      } finally {
+        submittingRef.current = false;
       }
     });
   }

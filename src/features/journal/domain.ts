@@ -1,3 +1,5 @@
+import { toRelationshipDate } from "@/lib/date/relationship-date";
+
 export type JournalEntryType = "today" | "future";
 export type FutureDiaryState = "waiting" | "ready" | "opened";
 export type FutureStateInput = { openAt: string; openedAt: string | null };
@@ -8,12 +10,7 @@ export type TodayDiaryManageInput = {
 };
 
 export function getChinaDate(value = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(value);
+  return toRelationshipDate(value);
 }
 
 export function deriveFutureState(

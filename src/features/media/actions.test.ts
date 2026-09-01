@@ -6,6 +6,7 @@ vi.mock("@/lib/supabase/server", () => ({ createServerSupabaseClient: vi.fn() })
 vi.mock("@/features/journal/repository", () => ({ getJournalEntry: vi.fn() }));
 
 import { getJournalEntry } from "@/features/journal/repository";
+import { createJournalEntryFixture } from "@/features/journal/test-fixtures";
 import { requireUser } from "@/lib/auth/require-user";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { getReadableImageUrl, uploadJournalImageAction } from "./actions";
@@ -53,7 +54,7 @@ function installClient(rpcResult: { data: unknown; error: unknown } = { data: nu
 describe("journal image server actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRequireUser.mockResolvedValue({ userId, spaceId, profile: {} as never });
+    mockRequireUser.mockResolvedValue({ userId, spaceId, email: "user@example.test", profile: {} as never });
   });
 
   it("derives a private create path from the authenticated space, author, and server entry ID", async () => {
@@ -561,23 +562,14 @@ describe("journal image server actions", () => {
     const client = installClient();
     const entryId = "33333333-3333-4333-8333-333333333333";
     const imagePath = `${spaceId}/${userId}/${entryId}.webp`;
-    mockGetJournalEntry.mockResolvedValue({
+    mockGetJournalEntry.mockResolvedValue(createJournalEntryFixture({
       id: entryId,
       spaceId,
       authorId: userId,
-      recipientId: null,
-      entryType: "today",
       title: "普通的一天",
       content: "今天一起散步。",
       imagePath,
-      entryDate: "2026-07-19",
-      publishedAt: "2026-07-19T10:00:00Z",
-      updatedAt: "2026-07-19T10:00:00Z",
-      lockedAt: "2026-07-20T10:00:00Z",
-      sealedAt: null,
-      openAt: null,
-      openedAt: null,
-    });
+    }));
 
     await expect(
       getReadableImageUrl("33333333-3333-4333-8333-333333333333"),

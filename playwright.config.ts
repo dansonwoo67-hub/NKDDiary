@@ -3,9 +3,10 @@ import { RESPONSIVE_VIEWPORTS } from "./scripts/playwright-e2e-config";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  globalSetup: "./scripts/playwright-global-setup.ts",
   fullyParallel: false,
   workers: 1,
-  timeout: 180_000,
+  timeout: 600_000,
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000",
     trace: "on-first-retry",

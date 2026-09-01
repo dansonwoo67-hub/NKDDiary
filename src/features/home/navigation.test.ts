@@ -10,6 +10,6 @@ describe("app navigation", () => {
       { href: "/calendar", label: "日历", icon: "calendar" },
       { href: "/settings", label: "设置", icon: "settings" },
     ]);
-    expect(APP_NAVIGATION.some(({ href }) => href === "/mood")).toBe(false);
+    expect(APP_NAVIGATION.map(({ href }) => String(href))).not.toContain("/mood");
   });
 });
