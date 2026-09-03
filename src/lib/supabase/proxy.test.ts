@@ -6,4 +6,9 @@ describe("isPublicRoute", () => {
     expect(isPublicRoute("/login")).toBe(true);
     expect(isPublicRoute("/login-anything")).toBe(false);
   });
+
+  it("allows the exact Preview diagnostic path through to its fail-closed handler", () => {
+    expect(isPublicRoute("/api/diagnostics/supabase-ref")).toBe(true);
+    expect(isPublicRoute("/api/diagnostics/supabase-ref/extra")).toBe(false);
+  });
 });

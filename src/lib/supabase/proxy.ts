@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_ROUTES = ["/login"];
+const PUBLIC_ROUTES = ["/login", "/api/diagnostics/supabase-ref"];
 
 export function isPublicRoute(pathname: string) {
   return PUBLIC_ROUTES.includes(pathname);
